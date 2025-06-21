@@ -3,6 +3,7 @@ import '../models/property.dart';
 import '../models/floor.dart';
 import '../services/api_service.dart';
 import 'notifications_screen.dart';
+import 'pending_payment_notifications_screen.dart';
 
 class PropertyDetailsScreen extends StatefulWidget {
   final Property property;
@@ -25,6 +26,9 @@ class _PropertyDetailsScreenState extends State<PropertyDetailsScreen> {
   @override
   void initState() {
     super.initState();
+    _apiService.loadCurrentUserId().then((_) {
+      setState(() {}); // Rebuild to update UI with loaded userId
+    });
     _loadPropertyDetails();
     _loadNotifications();
   }
@@ -33,7 +37,7 @@ class _PropertyDetailsScreenState extends State<PropertyDetailsScreen> {
     try {
       final notifications = await _apiService.getNotifications();
       setState(() {
-        _unreadNotifications = notifications.where((n) => n.status == 'pending').length;
+        _unreadNotifications = notifications.where((n) => !n.isRead).length;
       });
     } catch (e) {
       print('Error loading notifications: $e');
@@ -506,6 +510,58 @@ class _PropertyDetailsScreenState extends State<PropertyDetailsScreen> {
     );
   }
 
+  Future<void> _showSendPaymentDialog(Floor floor) async {
+    final amountController = TextEditingController();
+    return showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Send Payment Notification'),
+        content: TextField(
+          controller: amountController,
+          decoration: const InputDecoration(
+            labelText: 'Amount',
+            hintText: 'Enter payment amount',
+          ),
+          keyboardType: TextInputType.number,
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () async {
+              final amount = int.tryParse(amountController.text);
+              if (amount == null) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('Please enter a valid amount')),
+                );
+                return;
+              }
+              try {
+                await _apiService.sendPaymentNotification(
+                  propertyId: widget.property.id,
+                  floorId: floor.id,
+                  amount: amount,
+                );
+                Navigator.pop(context);
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('Payment notification sent!')),
+                );
+              } catch (e) {
+                Navigator.pop(context);
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(content: Text('Error: $e')),
+                );
+              }
+            },
+            child: const Text('Send'),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -517,6 +573,17 @@ class _PropertyDetailsScreenState extends State<PropertyDetailsScreen> {
               IconButton(
                 icon: const Icon(Icons.notifications),
                 onPressed: () async {
+                  // Mark notifications as read when user clicks the notification icon
+                  try {
+                    await _apiService.markNotificationsAsRead();
+                    // Update the unread count to 0
+                    setState(() {
+                      _unreadNotifications = 0;
+                    });
+                  } catch (e) {
+                    print('Error marking notifications as read: $e');
+                  }
+                  
                   await Navigator.push(
                     context,
                     MaterialPageRoute(
@@ -592,51 +659,100 @@ class _PropertyDetailsScreenState extends State<PropertyDetailsScreen> {
                         itemCount: _floors.length,
                         itemBuilder: (context, index) {
                           final floor = _floors[index];
+                          // DEBUG: Print tenant and currentUserId
+                          // ignore: avoid_print
+                          print('floor.tenant: \\${floor.tenant} (type: \\${floor.tenant.runtimeType}), currentUserId: \\${_apiService.currentUserId} (type: \\${_apiService.currentUserId.runtimeType})');
                           return Card(
                             margin: const EdgeInsets.only(bottom: 16),
-                            child: ListTile(
-                              leading: Icon(
-                                floor.status == 'occupied' ? Icons.person : 
-                                floor.status == 'pending' ? Icons.hourglass_empty : Icons.home,
-                                color: floor.status == 'occupied' ? Colors.blue : 
-                                      floor.status == 'pending' ? Colors.orange : Colors.green,
-                              ),
-                              title: Text(floor.name),
-                              subtitle: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text('Rent: ₹${floor.rent}/month'),
-                                  if (floor.tenant != null)
-                                    Text('Tenant: ${floor.tenant}'),
-                                  if (floor.status == 'pending')
-                                    const Text('Request Pending', 
-                                      style: TextStyle(color: Colors.orange, fontWeight: FontWeight.bold)),
-                                ],
-                              ),
-                              trailing: _isManager ? Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  IconButton(
-                                    icon: const Icon(Icons.edit, color: Colors.blue),
-                                    onPressed: () => _showUpdateFloorDialog(floor),
+                            child: Column(
+                              children: [
+                                ListTile(
+                                  leading: Icon(
+                                    floor.status == 'occupied' ? Icons.person : 
+                                    floor.status == 'pending' ? Icons.home : Icons.home,
+                                    color: floor.status == 'occupied' ? Colors.blue : 
+                                          floor.status == 'pending' ? Colors.green : Colors.green,
                                   ),
-                                  if (floor.tenant != null)
-                                    IconButton(
-                                      icon: const Icon(Icons.person_remove, color: Colors.red),
-                                      onPressed: () => _showRemoveTenantDialog(floor),
-                                    )
-                                  else if (floor.status == 'pending' && floor.notificationId != null)
-                                    IconButton(
-                                      icon: const Icon(Icons.cancel, color: Colors.orange),
-                                      onPressed: () => _showCancelRequestDialog(floor),
-                                    )
-                                  else
-                                    IconButton(
-                                      icon: const Icon(Icons.person_add, color: Colors.green),
-                                      onPressed: () => _showTenantRequestDialog(floor),
+                                  title: Text(floor.name),
+                                  subtitle: Column(
+                                    
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Text('Rent: ₹${floor.rent}/month'),
+                                      if (floor.tenant != null)
+                                        Text('Tenant: ${floor.tenant}'),
+                                      if (floor.status == 'pending')
+                                        Row(
+                                          children: [
+                                            const Text('Request Pending', 
+                                              style: TextStyle(color: Colors.orange, fontWeight: FontWeight.bold)),
+                                            if (floor.tenant != null && floor.tenant == _apiService.currentUserId) ...[
+                                              const SizedBox(width: 8),
+                                              const Icon(Icons.touch_app, size: 16, color: Colors.orange),
+                                              const Text('Tap to view', 
+                                                style: TextStyle(color: Colors.orange, fontSize: 12)),
+                                            ],
+                                          ],
+                                        ),
+                                    ],
+                                  ),
+                                  onTap: () {
+                                    // If tenant and status is pending, navigate to pending payment notifications
+                                    if (floor.status == 'pending' && 
+                                        floor.tenant != null && 
+                                        floor.tenant == _apiService.currentUserId) {
+                                      Navigator.push(
+                                        context,
+                                        MaterialPageRoute(
+                                          builder: (context) => PendingPaymentNotificationsScreen(
+                                            property: widget.property,
+                                            floor: floor,
+                                          ),
+                                        ),
+                                      );
+                                    }
+                                  },
+                                  trailing: _isManager ? Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      IconButton(
+                                        icon: const Icon(Icons.edit, color: Colors.blue),
+                                        onPressed: () => _showUpdateFloorDialog(floor),
+                                      ),
+                                      if (floor.tenant != null)
+                                        IconButton(
+                                          icon: const Icon(Icons.person_remove, color: Colors.red),
+                                          onPressed: () => _showRemoveTenantDialog(floor),
+                                        )
+                                      else if (floor.status == 'pending' && floor.notificationId != null)
+                                        IconButton(
+                                          icon: const Icon(Icons.cancel, color: Colors.orange),
+                                          onPressed: () => _showCancelRequestDialog(floor),
+                                        )
+                                      else
+                                        IconButton(
+                                          icon: const Icon(Icons.person_add, color: Colors.green),
+                                          onPressed: () => _showTenantRequestDialog(floor),
+                                        ),
+                                    ],
+                                  ) : null,
+                                ),
+                                // Payment notification button for tenants
+                                if (floor.tenant != null && floor.tenant == _apiService.currentUserId)
+                                  Padding(
+                                    padding: const EdgeInsets.only(left: 16, right: 16, bottom: 12),
+                                    child: SizedBox(
+                                      width: double.infinity,
+                                      child: ElevatedButton.icon(
+                                        icon: const Icon(Icons.payment),
+                                        label: const Text('Send Payment Notification'),
+                                        onPressed: () {
+                                          _showSendPaymentDialog(floor);
+                                        },
+                                      ),
                                     ),
-                                ],
-                              ) : null,
+                                  ),
+                              ],
                             ),
                           );
                         },

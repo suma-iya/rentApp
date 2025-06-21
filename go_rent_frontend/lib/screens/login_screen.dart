@@ -44,6 +44,8 @@ class _LoginScreenState extends State<LoginScreen> {
       );
 
       if (success && mounted) {
+        // Set the current user ID after login (replace 6366790 with actual userId from backend)
+        await _apiService.setCurrentUserId(6366790);
         // Navigate to properties screen on success
         Navigator.pushAndRemoveUntil(
           context,

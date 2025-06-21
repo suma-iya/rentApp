@@ -6,6 +6,7 @@ class AppNotification {
   final NotificationProperty property;
   final NotificationFloor floor;
   final bool showActions;
+  final bool isRead;
 
   AppNotification({
     required this.id,
@@ -15,6 +16,7 @@ class AppNotification {
     required this.property,
     required this.floor,
     required this.showActions,
+    required this.isRead,
   });
 
   factory AppNotification.fromJson(Map<String, dynamic> json) {
@@ -26,6 +28,7 @@ class AppNotification {
       property: NotificationProperty.fromJson(json['property']),
       floor: NotificationFloor.fromJson(json['floor']),
       showActions: json['show_actions'] ?? false,
+      isRead: json['is_read'] ?? false,
     );
   }
 
@@ -38,6 +41,7 @@ class AppNotification {
       'property': property.toJson(),
       'floor': floor.toJson(),
       'show_actions': showActions,
+      'is_read': isRead,
     };
   }
 }

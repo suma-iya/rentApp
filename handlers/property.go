@@ -13,7 +13,16 @@ import (
 	"strings"
 	"time"
 	"github.com/gorilla/mux"
+	"log"
 )
+
+// getUserIDFromContext retrieves the user ID from the request context
+func getUserIDFromContext(r *http.Request) int64 {
+	if userID, ok := r.Context().Value("userID").(int64); ok {
+		return userID
+	}
+	return 0
+}
 
 type PropertyRequest struct {
 	Name    string `json:"name"`
@@ -121,12 +130,17 @@ type Notification struct {
 		Name string `json:"name"`
 	} `json:"floor"`
 	ShowActions bool `json:"show_actions"`
+	IsRead      bool `json:"is_read"`
 }
 
 type NotificationsResponse struct {
 	Success       bool          `json:"success"`
 	Message       string        `json:"message"`
 	Notifications []Notification `json:"notifications"`
+}
+
+type PaymentNotificationRequest struct {
+	Amount int `json:"amount"`
 }
 
 func AddPropertyHandler(w http.ResponseWriter, r *http.Request) {
@@ -144,7 +158,7 @@ func AddPropertyHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Get user ID from session
-	userID := getUserIDFromSession(r)
+	userID := getUserIDFromContext(r)
 	if userID == 0 {
 		w.WriteHeader(http.StatusUnauthorized)
 		json.NewEncoder(w).Encode(PropertyResponse{false, "User not authenticated", 0})
@@ -231,25 +245,6 @@ func AddPropertyHandler(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// getUserIDFromSession retrieves the user ID from the session token
-func getUserIDFromSession(r *http.Request) int64 {
-	// Get token from cookie
-	cookie, err := r.Cookie("sessiontoken")
-	if err != nil {
-		fmt.Printf("Error getting session token: %v\n", err)
-		return 0 // Return 0 to indicate no user ID found
-	}
-
-	// Validate token and get user ID
-	userID, err := utils.ValidateToken(cookie.Value)
-	if err != nil {
-		fmt.Printf("Error validating token: %v\n", err)
-		return 0 // Return 0 to indicate no user ID found
-	}
-
-	return userID
-}
-
 func GetUserPropertiesHandler(w http.ResponseWriter, r *http.Request) {
 	fmt.Println("\n=== New Get User Properties Request ===")
 	fmt.Printf("Method: %s\n", r.Method)
@@ -265,7 +260,7 @@ func GetUserPropertiesHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Get user ID from session
-	userID := getUserIDFromSession(r)
+	userID := getUserIDFromContext(r)
 	if userID == 0 {
 		fmt.Println("No user ID found in session")
 		w.WriteHeader(http.StatusUnauthorized)
@@ -351,7 +346,7 @@ func GetPropertyByIDHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Get user ID from session
-	userID := getUserIDFromSession(r)
+	userID := getUserIDFromContext(r)
 	if userID == 0 {
 		fmt.Println("No user ID found in session")
 		w.WriteHeader(http.StatusUnauthorized)
@@ -568,7 +563,7 @@ func AddFloorHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Get user ID from session
-	userID := getUserIDFromSession(r)
+	userID := getUserIDFromContext(r)
 	if userID == 0 {
 		fmt.Println("No user ID found in session")
 		w.WriteHeader(http.StatusUnauthorized)
@@ -682,7 +677,7 @@ func GetFloorsHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 
 	// Get user ID from session
-	userID := getUserIDFromSession(r)
+	userID := getUserIDFromContext(r)
 	if userID == 0 {
 		fmt.Println("No user ID found in session")
 		w.WriteHeader(http.StatusUnauthorized)
@@ -791,7 +786,7 @@ func GetFloorByIDHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 
 	// Get user ID from session
-	userID := getUserIDFromSession(r)
+	userID := getUserIDFromContext(r)
 	if userID == 0 {
 		fmt.Println("No user ID found in session")
 		w.WriteHeader(http.StatusUnauthorized)
@@ -890,7 +885,7 @@ func UpdateFloorHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 
 	// Get user ID from session
-	userID := getUserIDFromSession(r)
+	userID := getUserIDFromContext(r)
 	if userID == 0 {
 		fmt.Println("No user ID found in session")
 		w.WriteHeader(http.StatusUnauthorized)
@@ -1043,7 +1038,7 @@ func GetUserPhonesHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Get user ID from session
-	userID := getUserIDFromSession(r)
+	userID := getUserIDFromContext(r)
 	if userID == 0 {
 		fmt.Println("No user ID found in session")
 		w.WriteHeader(http.StatusUnauthorized)
@@ -1127,7 +1122,7 @@ func GetUserIDByPhoneHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Get user ID from session
-	userID := getUserIDFromSession(r)
+	userID := getUserIDFromContext(r)
 	if userID == 0 {
 		fmt.Println("No user ID found in session")
 		w.WriteHeader(http.StatusUnauthorized)
@@ -1211,7 +1206,7 @@ func CreatePaymentHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Get user ID from session
-	userID := getUserIDFromSession(r)
+	userID := getUserIDFromContext(r)
 	fmt.Printf("User ID from session: %d\n", userID)
 	if userID == 0 {
 		fmt.Println("No user ID found in session")
@@ -1386,7 +1381,7 @@ func SendTenantRequestHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Get user ID from session
-	userID := getUserIDFromSession(r)
+	userID := getUserIDFromContext(r)
 	if userID == 0 {
 		w.WriteHeader(http.StatusUnauthorized)
 		json.NewEncoder(w).Encode(TenantRequestResponse{false, "User not authenticated"})
@@ -1531,10 +1526,25 @@ func SendTenantRequestHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Update floor status to 'pending' to show "Request Pending"
+	// TODO: Uncomment this after adding status column to floor table
+	// _, err = db.Exec(`
+	// 	UPDATE floor 
+	// 	SET status = 'pending', updated_at = NOW(), updated_by = ?
+	// 	WHERE id = ?
+	// `, userID, floorID)
+	
+	// if err != nil {
+	// 	log.Printf("Error updating floor status: %v", err)
+	// 	// Don't fail the entire request if floor status update fails
+	// } else {
+	// 	log.Printf("Updated floor ID %d status to 'pending'", floorID)
+	// }
+
 	w.WriteHeader(http.StatusCreated)
 	json.NewEncoder(w).Encode(TenantRequestResponse{
 		Success: true,
-		Message: "Tenant request sent successfully",
+			Message: "Tenant request sent successfully",
 	})
 }
 
@@ -1554,7 +1564,7 @@ func GetUserNotificationsHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Get user ID from session
-	userID := getUserIDFromSession(r)
+	userID := getUserIDFromContext(r)
 	if userID == 0 {
 		w.WriteHeader(http.StatusUnauthorized)
 		json.NewEncoder(w).Encode(NotificationsResponse{false, "User not authenticated", nil})
@@ -1576,14 +1586,18 @@ func GetUserNotificationsHandler(w http.ResponseWriter, r *http.Request) {
 			f.id as floor_id, f.name as floor_name,
 			CASE 
 				WHEN n.message LIKE 'Tenant request%' AND n.status = 'pending' THEN true
+				WHEN n.message LIKE 'Payment amount:%' AND n.status = 'pending' THEN true
 				ELSE false
-			END as show_actions
+			END as show_actions,
+			COALESCE(n.is_read, false) as is_read
 		FROM notification n
 		JOIN property p ON n.pid = p.id
 		JOIN floor f ON n.fid = f.id
 		WHERE n.receiver = ?
 		ORDER BY n.created_at DESC
 	`
+	
+	fmt.Printf("Executing notification query for user %d\n", userID)
 	
 	rows, err := db.Query(query, userID)
 	if err != nil {
@@ -1602,10 +1616,16 @@ func GetUserNotificationsHandler(w http.ResponseWriter, r *http.Request) {
 			&n.Property.ID, &n.Property.Name,
 			&n.Floor.ID, &n.Floor.Name,
 			&n.ShowActions,
+			&n.IsRead,
 		); err != nil {
 			fmt.Printf("Error scanning notification row: %v\n", err)
 			continue
 		}
+		
+		// Debug logging for each notification
+		fmt.Printf("Notification: ID=%d, Message='%s', Status='%s', ShowActions=%v, IsRead=%v\n", 
+			n.ID, n.Message, n.Status, n.ShowActions, n.IsRead)
+		
 		notifications = append(notifications, n)
 	}
 
@@ -1642,7 +1662,7 @@ func DeleteNotificationHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Get user ID from session
-	userID := getUserIDFromSession(r)
+	userID := getUserIDFromContext(r)
 	if userID == 0 {
 		w.WriteHeader(http.StatusUnauthorized)
 		json.NewEncoder(w).Encode(TenantRequestResponse{false, "User not authenticated"})
@@ -1680,6 +1700,8 @@ func DeleteNotificationHandler(w http.ResponseWriter, r *http.Request) {
 
 	// Check if user is the sender of the notification and if it's pending
 	var isSender bool
+	var floorID int64
+	var message string
 	err = db.QueryRow(`
 		SELECT EXISTS(
 			SELECT 1 FROM notification 
@@ -1698,8 +1720,29 @@ func DeleteNotificationHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Get the notification details before deleting
+	err = db.QueryRow(`
+		SELECT fid, message
+		FROM notification 
+		WHERE id = ? AND sender = ? AND status = 'pending'`, notificationID, userID).Scan(&floorID, &message)
+	
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(TenantRequestResponse{false, "Error getting notification details"})
+		return
+	}
+
+	// Start transaction
+	tx, err := db.Begin()
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(TenantRequestResponse{false, "Error starting transaction"})
+		return
+	}
+	defer tx.Rollback()
+
 	// Delete the notification
-	_, err = db.Exec(`
+	_, err = tx.Exec(`
 		DELETE FROM notification 
 		WHERE id = ? AND sender = ? AND status = 'pending'`,
 		notificationID, userID)
@@ -1707,6 +1750,46 @@ func DeleteNotificationHandler(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		json.NewEncoder(w).Encode(TenantRequestResponse{false, "Error deleting notification"})
+		return
+	}
+
+	// Check if this was a payment notification and clear floor status if no more pending notifications
+	if strings.HasPrefix(message, "Payment amount:") {
+		// Check if there are any remaining pending notifications for this floor
+		var remainingNotifications int
+		err = tx.QueryRow(`
+			SELECT COUNT(*) 
+			FROM notification 
+			WHERE fid = ? AND status = 'pending'`, floorID).Scan(&remainingNotifications)
+		
+		if err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			json.NewEncoder(w).Encode(TenantRequestResponse{false, "Error checking remaining notifications"})
+			return
+		}
+
+		// If no more pending notifications, clear the floor status
+		if remainingNotifications == 0 {
+			// TODO: Uncomment this after adding status column to floor table
+			// _, err = tx.Exec(`
+			// 	UPDATE floor 
+			// 	SET status = NULL, updated_at = NOW(), updated_by = ?
+			// 		WHERE id = ?`, userID, floorID)
+			
+			// if err != nil {
+			// 	w.WriteHeader(http.StatusInternalServerError)
+			// 	json.NewEncoder(w).Encode(TenantRequestResponse{false, "Error clearing floor status"})
+			// 	return
+			// }
+			
+			// fmt.Printf("Cleared pending status from floor ID: %d after deleting payment notification", floorID)
+		}
+	}
+
+	// Commit transaction
+	if err = tx.Commit(); err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(TenantRequestResponse{false, "Error committing transaction"})
 		return
 	}
 
@@ -1798,9 +1881,9 @@ func SendMonthlyNotifications() {
 	fmt.Println("Monthly notifications sent successfully.")
 }
 
-// HandleTenantRequestAction handles POST requests to accept/reject tenant requests
+// HandleTenantRequestAction handles POST requests to accept/reject tenant requests and payment notifications
 func HandleTenantRequestAction(w http.ResponseWriter, r *http.Request) {
-	fmt.Println("\n=== New Tenant Request Action ===")
+	fmt.Println("\n=== New Notification Action Request ===")
 	fmt.Printf("Method: %s\n", r.Method)
 	fmt.Printf("URL: %s\n", r.URL)
 
@@ -1814,7 +1897,7 @@ func HandleTenantRequestAction(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Get user ID from session
-	userID := getUserIDFromSession(r)
+	userID := getUserIDFromContext(r)
 	if userID == 0 {
 		w.WriteHeader(http.StatusUnauthorized)
 		json.NewEncoder(w).Encode(TenantRequestResponse{false, "User not authenticated"})
@@ -1911,38 +1994,126 @@ func HandleTenantRequestAction(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// If accepted, update floor table
-	if request.Accept {
-		// Check if floor is already occupied
-		var isOccupied bool
+	// Check if this is a payment notification or tenant request
+	isPaymentNotification := strings.HasPrefix(notification.Message, "Payment amount:")
+	
+	if isPaymentNotification {
+		// Handle payment notification - just update status for now
+		if request.Accept {
+			// Payment accepted - skip payment record creation for now
+			fmt.Printf("Payment notification accepted: ID=%d (payment record creation disabled)", notification.ID)
+			
+			// Clear any pending notification status from the floor
+			// TODO: Uncomment this after adding status column to floor table
+			// _, err = tx.Exec(`
+			// 	UPDATE floor 
+			// 	SET status = NULL, updated_at = NOW(), updated_by = ?
+			// 	WHERE id = ?
+			// `, userID, notification.FloorID)
+			
+			// if err != nil {
+			// 	fmt.Printf("Error clearing floor status: %v\n", err)
+			// 	http.Error(w, "Failed to clear floor status", http.StatusInternalServerError)
+			// 	return
+			// }
+			
+			// fmt.Printf("Cleared pending status from floor ID: %d", notification.FloorID)
+		}
+		// If rejected, just update the notification status (already done above)
+		
+		// Create a new notification to inform the tenant about the payment status
+		// Get property and floor names for the notification message
+		var propertyName, floorName string
 		err = tx.QueryRow(`
-			SELECT COUNT(*) > 0
-			FROM floor 
-			WHERE id = ? AND tenant IS NOT NULL
-		`, notification.FloorID).Scan(&isOccupied)
-
+			SELECT p.name, f.name
+			FROM property p
+			JOIN floor f ON p.id = f.pid
+			WHERE p.id = ? AND f.id = ?`, notification.PID, notification.FloorID).Scan(&propertyName, &floorName)
+		
 		if err != nil {
-			fmt.Printf("Error checking floor status: %v\n", err)
-			http.Error(w, "Failed to check floor status", http.StatusInternalServerError)
+			fmt.Printf("Error getting property/floor names: %v\n", err)
+			http.Error(w, "Failed to get property details", http.StatusInternalServerError)
 			return
 		}
-
-		if isOccupied {
-			http.Error(w, "Floor is already occupied", http.StatusConflict)
+		
+		// Generate new notification ID
+		statusNotificationID, err := utils.GenerateRandomID()
+		if err != nil {
+			fmt.Printf("Error generating status notification ID: %v\n", err)
+			http.Error(w, "Error generating notification ID", http.StatusInternalServerError)
 			return
 		}
-
-		// Update floor with tenant (receiver of the notification, not sender)
+		
+		// Create status message
+		statusMessage := fmt.Sprintf("Payment %s - %s, %s at %s", 
+			newStatus, 
+			propertyName, 
+			floorName, 
+			time.Now().In(time.FixedZone("BDT", 6*60*60)).Format("2006-01-02 15:04:05"))
+		
+		// Insert the status notification
+		// Note: sender is the original notification's receiver (manager), receiver is the original notification's sender (tenant)
 		_, err = tx.Exec(`
-			UPDATE floor 
-			SET tenant = ?, updated_at = NOW(), updated_by = ?
-			WHERE id = ?
-		`, notification.Receiver, userID, notification.FloorID)
-
+			INSERT INTO notification (
+				id, message, sender, receiver, pid, fid,
+				status, created_at, created_by, updated_at, updated_by
+			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			statusNotificationID,
+			statusMessage,
+			notification.Receiver, // manager (original receiver)
+			notification.Sender,   // tenant (original sender)
+			notification.PID,
+			notification.FloorID,
+			newStatus, // Use the same status as the action (accepted/rejected)
+			time.Now().In(time.FixedZone("BDT", 6*60*60)).Format("2006-01-02 15:04:05"),
+			userID,
+			time.Now().In(time.FixedZone("BDT", 6*60*60)).Format("2006-01-02 15:04:05"),
+			userID,
+		)
+		
 		if err != nil {
-			fmt.Printf("Error updating floor: %v\n", err)
-			http.Error(w, "Failed to update floor", http.StatusInternalServerError)
+			fmt.Printf("Error creating status notification: %v\n", err)
+			http.Error(w, "Failed to create status notification", http.StatusInternalServerError)
 			return
+		}
+		
+		fmt.Printf("Created status notification: ID=%d, Message='%s', from manager=%d to tenant=%d", 
+			statusNotificationID, statusMessage, notification.Receiver, notification.Sender)
+		
+	} else {
+		// Handle tenant request
+		if request.Accept {
+			// Check if floor is already occupied
+			var isOccupied bool
+			err = tx.QueryRow(`
+				SELECT COUNT(*) > 0
+				FROM floor 
+				WHERE id = ? AND tenant IS NOT NULL
+			`, notification.FloorID).Scan(&isOccupied)
+
+			if err != nil {
+				fmt.Printf("Error checking floor status: %v\n", err)
+				http.Error(w, "Failed to check floor status", http.StatusInternalServerError)
+				return
+			}
+
+			if isOccupied {
+				http.Error(w, "Floor is already occupied", http.StatusConflict)
+				return
+			}
+
+			// Update floor with tenant (receiver of the notification, not sender)
+			_, err = tx.Exec(`
+				UPDATE floor 
+				SET tenant = ?, updated_at = NOW(), updated_by = ?
+				WHERE id = ?
+			`, notification.Receiver, userID, notification.FloorID)
+
+			if err != nil {
+				fmt.Printf("Error updating floor: %v\n", err)
+				http.Error(w, "Failed to update floor", http.StatusInternalServerError)
+				return
+			}
 		}
 	}
 
@@ -1954,10 +2125,14 @@ func HandleTenantRequestAction(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Send response
-	w.Header().Set("Content-Type", "application/json")
+	actionType := "payment notification"
+	if !isPaymentNotification {
+		actionType = "tenant request"
+	}
+	
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"success": true,
-		"message": "Tenant request " + newStatus,
+		"message": actionType + " " + newStatus,
 	})
 }
 
@@ -1977,7 +2152,7 @@ func GetUserTenantPropertiesHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Get user ID from session
-	userID := getUserIDFromSession(r)
+	userID := getUserIDFromContext(r)
 	if userID == 0 {
 		fmt.Println("No user ID found in session")
 		w.WriteHeader(http.StatusUnauthorized)
@@ -2057,7 +2232,7 @@ func RemoveTenantHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Get user ID from session
-	userID := getUserIDFromSession(r)
+	userID := getUserIDFromContext(r)
 	vars := mux.Vars(r)
 	propertyID, err := strconv.ParseInt(vars["id"], 10, 64)
 	if err != nil {
@@ -2185,7 +2360,7 @@ func CheckUserManagerHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Get user ID from session
-	userID := getUserIDFromSession(r)
+	userID := getUserIDFromContext(r)
 	if userID == 0 {
 		fmt.Println("No user ID found in session")
 		w.WriteHeader(http.StatusUnauthorized)
@@ -2250,4 +2425,392 @@ func CheckUserManagerHandler(w http.ResponseWriter, r *http.Request) {
 
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(response)
-} 
+}
+
+func SendPaymentNotificationHandler(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	propertyID, err := strconv.ParseInt(vars["id"], 10, 64)
+	if err != nil {
+		http.Error(w, "Invalid property ID", http.StatusBadRequest)
+		return
+	}
+	floorID, err := strconv.ParseInt(vars["floor_id"], 10, 64)
+	if err != nil {
+		http.Error(w, "Invalid floor ID", http.StatusBadRequest)
+		return
+	}
+
+	var req PaymentNotificationRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request", http.StatusBadRequest)
+		return
+	}
+
+	userID := getUserIDFromContext(r) // sender (tenant)
+	db, err := config.GetDBConnection()
+	if err != nil {
+		http.Error(w, "Database error", http.StatusInternalServerError)
+		return
+	}
+
+	// Check if user is the tenant of this floor
+	var isTenant bool
+	err = db.QueryRow(`SELECT EXISTS(SELECT 1 FROM floor WHERE id = ? AND pid = ? AND tenant = ?)`, floorID, propertyID, userID).Scan(&isTenant)
+	log.Printf("[Tenant Check] floorID=%d, propertyID=%d, userID=%d, isTenant=%v, err=%v", floorID, propertyID, userID, isTenant, err)
+	
+	if err != nil || !isTenant {
+		if err != nil {
+			log.Printf("[Tenant Check] DB error: %v", err)
+		}
+		if !isTenant {
+			log.Printf("[Tenant Check] User is not the tenant of this floor.")
+		}
+		http.Error(w, "You are not the tenant of this floor", http.StatusForbidden)
+		return
+	}
+
+	// Get property manager (receiver)
+	var managerID int64
+	err = db.QueryRow(`SELECT uid FROM takes_care_of WHERE pid = ? LIMIT 1`, propertyID).Scan(&managerID)
+	if err != nil {
+		http.Error(w, "Manager not found", http.StatusInternalServerError)
+		return
+	}
+
+	// Get property and floor names
+	var propertyName, floorName string
+	err = db.QueryRow(`SELECT name FROM property WHERE id = ?`, propertyID).Scan(&propertyName)
+	if err != nil {
+		http.Error(w, "Property not found", http.StatusInternalServerError)
+		return
+	}
+	err = db.QueryRow(`SELECT name FROM floor WHERE id = ?`, floorID).Scan(&floorName)
+	if err != nil {
+		http.Error(w, "Floor not found", http.StatusInternalServerError)
+		return
+	}
+
+	// Compose message with structured format
+	message := fmt.Sprintf("Payment amount: $%d", req.Amount)
+
+	// Generate notification ID
+	notificationID, err := utils.GenerateRandomID()
+	if err != nil {
+		http.Error(w, "Error generating notification ID", http.StatusInternalServerError)
+		return
+	}
+
+	// Insert notification with all required fields
+	_, err = db.Exec(`
+		INSERT INTO notification (
+			id, message, sender, receiver, pid, fid, status, 
+			created_at, created_by, updated_at, updated_by
+		) VALUES (?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?)
+	`, notificationID, message, userID, managerID, propertyID, floorID,
+	   time.Now().In(time.FixedZone("BDT", 6*60*60)).Format("2006-01-02 15:04:05"),
+	   userID,
+	   time.Now().In(time.FixedZone("BDT", 6*60*60)).Format("2006-01-02"),
+	   userID)
+	
+	if err != nil {
+		log.Printf("Error inserting notification: %v", err)
+		http.Error(w, "Failed to send notification", http.StatusInternalServerError)
+		return
+	}
+
+	// Update floor status to 'pending' to show "Request Pending"
+	// TODO: Uncomment this after adding status column to floor table
+	// _, err = db.Exec(`
+	// 	UPDATE floor 
+	// 	SET status = 'pending', updated_at = NOW(), updated_by = ?
+	// 	WHERE id = ?
+	// `, userID, floorID)
+	
+	// if err != nil {
+	// 	log.Printf("Error updating floor status: %v", err)
+	// 	// Don't fail the entire request if floor status update fails
+	// } else {
+	// 	log.Printf("Updated floor ID %d status to 'pending'", floorID)
+	// }
+
+	log.Printf("Successfully sent payment notification: ID=%d, from user=%d to manager=%d", notificationID, userID, managerID)
+
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]interface{}{"success": true, "message": "Payment notification sent"})
+}
+
+// HandlePaymentNotificationAction handles POST requests to accept/reject payment notifications
+func HandlePaymentNotificationAction(w http.ResponseWriter, r *http.Request) {
+	// This function is no longer needed as payment notifications are handled in HandleTenantRequestAction
+	http.Error(w, "Use /notifications/action endpoint instead", http.StatusMovedPermanently)
+}
+
+// GetPendingPaymentNotificationsHandler handles GET requests to get pending payment notifications for a floor
+func GetPendingPaymentNotificationsHandler(w http.ResponseWriter, r *http.Request) {
+	fmt.Println("\n=== New Get Pending Payment Notifications Request ===")
+	fmt.Printf("Method: %s\n", r.Method)
+	fmt.Printf("URL: %s\n", r.URL)
+
+	// Set response header to JSON
+	w.Header().Set("Content-Type", "application/json")
+
+	if r.Method != http.MethodGet {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		json.NewEncoder(w).Encode(NotificationsResponse{false, "Method not allowed", nil})
+		return
+	}
+
+	// Get user ID from session
+	userID := getUserIDFromContext(r)
+	if userID == 0 {
+		fmt.Println("No user ID found in session")
+		w.WriteHeader(http.StatusUnauthorized)
+		json.NewEncoder(w).Encode(NotificationsResponse{false, "User not authenticated", nil})
+		return
+	}
+
+	// Extract property ID and floor ID from URL using Gorilla Mux's Vars
+	vars := mux.Vars(r)
+	propertyID, err := strconv.ParseInt(vars["id"], 10, 64)
+	if err != nil {
+		http.Error(w, "Invalid property ID", http.StatusBadRequest)
+		return
+	}
+
+	floorID, err := strconv.ParseInt(vars["floor_id"], 10, 64)
+	if err != nil {
+		http.Error(w, "Invalid floor ID", http.StatusBadRequest)
+		return
+	}
+
+	fmt.Printf("Fetching pending payment notifications for floor ID: %d, property ID: %d, user ID: %d\n", floorID, propertyID, userID)
+
+	db, err := config.GetDBConnection()
+	if err != nil {
+		fmt.Printf("Database connection error: %v\n", err)
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(NotificationsResponse{false, "Database connection error", nil})
+		return
+	}
+
+	// Check if user is the tenant of this floor
+	var isTenant bool
+	err = db.QueryRow(`
+		SELECT EXISTS(
+			SELECT 1 FROM floor 
+			WHERE id = ? AND pid = ? AND tenant = ?
+		)`, floorID, propertyID, userID).Scan(&isTenant)
+	
+	if err != nil {
+		fmt.Printf("Error checking tenant status: %v\n", err)
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(NotificationsResponse{false, "Error checking tenant status", nil})
+		return
+	}
+
+	if !isTenant {
+		fmt.Printf("User %d is not a tenant of floor %d in property %d\n", userID, floorID, propertyID)
+		w.WriteHeader(http.StatusForbidden)
+		json.NewEncoder(w).Encode(NotificationsResponse{false, "You are not a tenant of this floor", nil})
+		return
+	}
+
+	// Get pending payment notifications for this floor where the user is the sender
+	query := `
+		SELECT 
+			n.id, n.message, n.status, n.created_at,
+			p.id as property_id, p.name as property_name,
+			f.id as floor_id, f.name as floor_name,
+			false as show_actions
+		FROM notification n
+		JOIN property p ON n.pid = p.id
+		JOIN floor f ON n.fid = f.id
+		WHERE n.fid = ? 
+		AND n.sender = ? 
+		AND n.message LIKE 'Payment amount:%'
+		AND n.status = 'pending'
+		ORDER BY n.created_at DESC
+	`
+	
+	fmt.Printf("Executing query: %s with floorID: %d, userID: %d\n", query, floorID, userID)
+	
+	rows, err := db.Query(query, floorID, userID)
+	if err != nil {
+		fmt.Printf("Error querying notifications: %v\n", err)
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(NotificationsResponse{false, "Error fetching notifications", nil})
+		return
+	}
+	defer rows.Close()
+
+	var notifications []Notification
+	for rows.Next() {
+		var n Notification
+		if err := rows.Scan(
+			&n.ID, &n.Message, &n.Status, &n.CreatedAt,
+			&n.Property.ID, &n.Property.Name,
+			&n.Floor.ID, &n.Floor.Name,
+			&n.ShowActions,
+		); err != nil {
+			fmt.Printf("Error scanning notification row: %v\n", err)
+			continue
+		}
+		
+		// Debug logging for each notification
+		fmt.Printf("Payment notification: ID=%d, Message='%s', Status='%s'\n", 
+			n.ID, n.Message, n.Status)
+		
+		notifications = append(notifications, n)
+	}
+
+	if err = rows.Err(); err != nil {
+		fmt.Printf("Error iterating notification rows: %v\n", err)
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(NotificationsResponse{false, "Error processing notifications", nil})
+		return
+	}
+
+	fmt.Printf("Found %d pending payment notifications for floor %d\n", len(notifications), floorID)
+
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(NotificationsResponse{
+		Success:       true,
+		Message:       "Pending payment notifications retrieved successfully",
+		Notifications: notifications,
+	})
+}
+
+// MarkNotificationsAsReadHandler handles POST requests to mark notifications as read
+func MarkNotificationsAsReadHandler(w http.ResponseWriter, r *http.Request) {
+	fmt.Println("\n=== New Mark Notifications As Read Request ===")
+	fmt.Printf("Method: %s\n", r.Method)
+	fmt.Printf("URL: %s\n", r.URL)
+
+	// Set response header to JSON
+	w.Header().Set("Content-Type", "application/json")
+
+	if r.Method != http.MethodPost {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		json.NewEncoder(w).Encode(TenantRequestResponse{false, "Method not allowed"})
+		return
+	}
+
+	// Get user ID from session
+	userID := getUserIDFromContext(r)
+	if userID == 0 {
+		w.WriteHeader(http.StatusUnauthorized)
+		json.NewEncoder(w).Encode(TenantRequestResponse{false, "User not authenticated"})
+		return
+	}
+
+	db, err := config.GetDBConnection()
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(TenantRequestResponse{false, "Database connection error"})
+		return
+	}
+
+	// Mark all notifications for this user as read
+	_, err = db.Exec(`
+		UPDATE notification 
+		SET is_read = true, updated_at = NOW(), updated_by = ?
+		WHERE receiver = ? AND is_read = false
+	`, userID, userID)
+
+	if err != nil {
+		fmt.Printf("Error marking notifications as read: %v\n", err)
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(TenantRequestResponse{false, "Error marking notifications as read"})
+		return
+	}
+
+	fmt.Printf("Marked all notifications as read for user %d\n", userID)
+
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(TenantRequestResponse{
+		Success: true,
+		Message: "Notifications marked as read successfully",
+	})
+}
+
+// AddTenantToFloorHandler handles POST requests to add a tenant to a floor
+func AddTenantToFloorHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	if r.Method != http.MethodPost {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		json.NewEncoder(w).Encode(TenantRequestResponse{false, "Method not allowed"})
+		return
+	}
+
+	// Get user ID from session
+	userID := getUserIDFromContext(r)
+	if userID == 0 {
+		w.WriteHeader(http.StatusUnauthorized)
+		json.NewEncoder(w).Encode(TenantRequestResponse{false, "User not authenticated"})
+		return
+	}
+
+	// Extract property ID and floor ID from URL
+	vars := mux.Vars(r)
+	propertyID, err := strconv.ParseInt(vars["id"], 10, 64)
+	if err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(TenantRequestResponse{false, "Invalid property ID"})
+		return
+	}
+	floorID, err := strconv.ParseInt(vars["floor_id"], 10, 64)
+	if err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(TenantRequestResponse{false, "Invalid floor ID"})
+		return
+	}
+
+	// Parse request body
+	var req struct {
+		Name        string `json:"name"`
+		PhoneNumber string `json:"phone_number"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(TenantRequestResponse{false, "Invalid request body"})
+		return
+	}
+	if req.Name == "" || req.PhoneNumber == "" {
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(TenantRequestResponse{false, "Name and phone number are required"})
+		return
+	}
+
+	db, err := config.GetDBConnection()
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(TenantRequestResponse{false, "Database connection error"})
+		return
+	}
+
+	// Find tenant user by phone number
+	var tenantID int64
+	err = db.QueryRow(`SELECT id FROM user WHERE phone_number = ?`, req.PhoneNumber).Scan(&tenantID)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			w.WriteHeader(http.StatusNotFound)
+			json.NewEncoder(w).Encode(TenantRequestResponse{false, "User not found with this phone number"})
+			return
+		}
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(TenantRequestResponse{false, "Error finding user"})
+		return
+	}
+
+	// Update floor with tenant
+	_, err = db.Exec(`UPDATE floor SET tenant = ?, updated_at = NOW(), updated_by = ? WHERE id = ? AND pid = ?`, tenantID, userID, floorID, propertyID)
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(TenantRequestResponse{false, "Error updating floor with tenant"})
+		return
+	}
+
+	w.WriteHeader(http.StatusCreated)
+	json.NewEncoder(w).Encode(TenantRequestResponse{true, "Tenant added to floor successfully"})
+}

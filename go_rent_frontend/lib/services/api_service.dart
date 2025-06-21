@@ -13,6 +13,9 @@ class ApiService {
   static const String baseUrl = 'http://192.168.0.230:8080';
   String? _sessionToken;
   final _client = http.Client();
+  int? _currentUserId;
+
+  int? get currentUserId => _currentUserId;
 
   Future<void> setSessionToken(String token) async {
     _sessionToken = token;
@@ -721,6 +724,98 @@ class ApiService {
       }
     } catch (e) {
       print('Error fetching tenant properties: $e');
+      if (e.toString().contains('SocketException')) {
+        throw Exception('Could not connect to server. Please check if the server is running and you have internet connection.');
+      }
+      throw Exception('Error: $e');
+    }
+  }
+
+  Future<void> setCurrentUserId(int userId) async {
+    _currentUserId = userId;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setInt('current_user_id', userId);
+  }
+
+  Future<void> loadCurrentUserId() async {
+    final prefs = await SharedPreferences.getInstance();
+    _currentUserId = prefs.getInt('current_user_id');
+  }
+
+  Future<void> sendPaymentNotification({
+    required int propertyId,
+    required int floorId,
+    required int amount,
+  }) async {
+    final response = await _client.post(
+      Uri.parse('$baseUrl/property/$propertyId/floor/$floorId/payment-notification'),
+      headers: _headers,
+      body: json.encode({'amount': amount}),
+    );
+    if (response.statusCode != 200) {
+      throw Exception('Failed to send payment notification');
+    }
+  }
+
+  Future<List<models.AppNotification>> getPendingPaymentNotifications(int propertyId, int floorId) async {
+    try {
+      print('Fetching pending payment notifications for property: $propertyId, floor: $floorId');
+      final response = await _client.get(
+        Uri.parse('$baseUrl/property/$propertyId/floor/$floorId/pending-payments'),
+        headers: _headers,
+      );
+
+      print('Response status code: ${response.statusCode}');
+      print('Response body: ${response.body}');
+
+      if (response.statusCode == 200) {
+        final Map<String, dynamic> data = json.decode(response.body);
+        if (data['success']) {
+          final notifications = data['notifications'] as List<dynamic>?;
+          if (notifications == null) {
+            return [];
+          }
+          return notifications.map((n) => models.AppNotification.fromJson(n)).toList();
+        } else {
+          throw Exception(data['message'] ?? 'Failed to load pending payment notifications');
+        }
+      } else if (response.statusCode == 401) {
+        await clearSessionToken();
+        throw Exception('Session expired. Please login again.');
+      } else {
+        throw Exception('Server returned status code ${response.statusCode}');
+      }
+    } catch (e) {
+      print('Error fetching pending payment notifications: $e');
+      if (e.toString().contains('SocketException')) {
+        throw Exception('Could not connect to server. Please check if the server is running and you have internet connection.');
+      }
+      throw Exception('Error: $e');
+    }
+  }
+
+  Future<bool> markNotificationsAsRead() async {
+    try {
+      print('Marking notifications as read');
+      final response = await _client.post(
+        Uri.parse('$baseUrl/notifications/mark-read'),
+        headers: _headers,
+      );
+
+      print('Response status code: ${response.statusCode}');
+      print('Response body: ${response.body}');
+
+      if (response.statusCode == 200) {
+        final Map<String, dynamic> data = json.decode(response.body);
+        return data['success'] ?? false;
+      } else if (response.statusCode == 401) {
+        await clearSessionToken();
+        throw Exception('Session expired. Please login again.');
+      } else {
+        throw Exception('Server returned status code ${response.statusCode}');
+      }
+    } catch (e) {
+      print('Error marking notifications as read: $e');
       if (e.toString().contains('SocketException')) {
         throw Exception('Could not connect to server. Please check if the server is running and you have internet connection.');
       }

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"go-rent/config"
 	"go-rent/handlers"
+	"go-rent/middleware"
 	"go-rent/scheduler"
 	"log"
 	"net/http"
@@ -25,48 +26,56 @@ func main() {
 	// ✅ Use gorilla/mux router, not net/http ServeMux
 	router := mux.NewRouter()
 
-	// Register routes properly using gorilla/mux
+	// Apply CORS middleware to all routes
+	router.Use(middleware.CORSMiddleware)
+	
+	// Apply rate limiting middleware to all routes
+	router.Use(middleware.RateLimitMiddleware)
+
+	// Public routes (no authentication required)
 	router.HandleFunc("/login", handlers.LoginHandler).Methods("POST")
 	router.HandleFunc("/register", handlers.RegisterHandler).Methods("POST")
 
+	// Protected routes (authentication required)
+	// Apply auth middleware to all protected routes
+	protectedRouter := router.PathPrefix("/").Subrouter()
+	protectedRouter.Use(middleware.AuthMiddleware)
+
 	// Property routes
-	router.HandleFunc("/properties", handlers.GetUserPropertiesHandler).Methods("GET")
-	router.HandleFunc("/properties/tenant", handlers.GetUserTenantPropertiesHandler).Methods("GET")
-	router.HandleFunc("/property", handlers.AddPropertyHandler).Methods("POST")
-	router.HandleFunc("/property/{id:[0-9]+}", handlers.GetPropertyByIDHandler).Methods("GET")
-	router.HandleFunc("/property/{id:[0-9]+}/manager", handlers.CheckUserManagerHandler).Methods("GET")
+	protectedRouter.HandleFunc("/properties", handlers.GetUserPropertiesHandler).Methods("GET")
+	protectedRouter.HandleFunc("/properties/tenant", handlers.GetUserTenantPropertiesHandler).Methods("GET")
+	protectedRouter.HandleFunc("/property/{id:[0-9]+}", handlers.GetPropertyByIDHandler).Methods("GET")
+	protectedRouter.HandleFunc("/property/{id:[0-9]+}/manager", handlers.CheckUserManagerHandler).Methods("GET")
+	protectedRouter.HandleFunc("/property", handlers.AddPropertyHandler).Methods("POST")
 
-	// Floor routes
-	router.HandleFunc("/property/{id:[0-9]+}/floor", handlers.AddFloorHandler).Methods("POST")
-	router.HandleFunc("/property/{id:[0-9]+}/floor", handlers.GetFloorsHandler).Methods("GET")
+	// Manager-only routes (require manager privileges)
+	managerRouter := protectedRouter.PathPrefix("/property/{id:[0-9]+}").Subrouter()
+	managerRouter.Use(middleware.ManagerMiddleware)
+	
+	managerRouter.HandleFunc("/floor", handlers.GetFloorsHandler).Methods("GET")
+	managerRouter.HandleFunc("/floor", handlers.AddFloorHandler).Methods("POST")
+	managerRouter.HandleFunc("/floor/{floor_id:[0-9]+}", handlers.GetFloorByIDHandler).Methods("GET")
+	managerRouter.HandleFunc("/floor/{floor_id:[0-9]+}", handlers.UpdateFloorHandler).Methods("PUT")
+	managerRouter.HandleFunc("/floor/{floor_id:[0-9]+}/request", handlers.SendTenantRequestHandler).Methods("POST")
+	managerRouter.HandleFunc("/floor/{floor_id:[0-9]+}/tenant", handlers.AddTenantToFloorHandler).Methods("POST")
+	managerRouter.HandleFunc("/floor/{floor_id:[0-9]+}/tenant", handlers.RemoveTenantHandler).Methods("DELETE")
+	managerRouter.HandleFunc("/floor/{floor_id:[0-9]+}/payment", handlers.CreatePaymentHandler).Methods("POST")
 
-	// Floor details and update routes
-	router.HandleFunc("/property/{id:[0-9]+}/floor/{floor_id:[0-9]+}", func(w http.ResponseWriter, r *http.Request) {
-		if r.Method == http.MethodGet {
-			handlers.GetFloorByIDHandler(w, r)
-		} else if r.Method == http.MethodPut {
-			handlers.UpdateFloorHandler(w, r)
-		} else {
-			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		}
-	}).Methods("GET", "PUT")
+	// User routes
+	protectedRouter.HandleFunc("/users/phones", handlers.GetUserPhonesHandler).Methods("GET")
+	protectedRouter.HandleFunc("/users/phones/{phone}", handlers.GetUserIDByPhoneHandler).Methods("GET")
 
-	// Tenant request route
-	router.HandleFunc("/property/{id:[0-9]+}/floor/{floor_id:[0-9]+}/request", handlers.SendTenantRequestHandler).Methods("POST")
+	// Notification routes
+	protectedRouter.HandleFunc("/notifications", handlers.GetUserNotificationsHandler).Methods("GET")
+	protectedRouter.HandleFunc("/notifications/mark-read", handlers.MarkNotificationsAsReadHandler).Methods("POST")
+	protectedRouter.HandleFunc("/notifications/delete/{id}", handlers.DeleteNotificationHandler).Methods("DELETE")
+	protectedRouter.HandleFunc("/notifications/action", handlers.HandleTenantRequestAction).Methods("POST")
 
-	// Payment route
-	router.HandleFunc("/property/{id:[0-9]+}/floor/{floor_id:[0-9]+}/payment", handlers.CreatePaymentHandler).Methods("POST")
+	// New payment notification route
+	protectedRouter.HandleFunc("/property/{id:[0-9]+}/floor/{floor_id:[0-9]+}/payment-notification", handlers.SendPaymentNotificationHandler).Methods("POST")
 
-	// User phones route
-	router.HandleFunc("/users/phones", handlers.GetUserPhonesHandler).Methods("GET")
-	router.HandleFunc("/users/phones/{phone}", handlers.GetUserIDByPhoneHandler).Methods("GET")
-
-	router.HandleFunc("/notifications", handlers.GetUserNotificationsHandler).Methods("GET")
-	router.HandleFunc("/notifications/delete/{id}", handlers.DeleteNotificationHandler).Methods("DELETE")
-	router.HandleFunc("/notifications/action", handlers.HandleTenantRequestAction).Methods("POST")
-
-	// Add this route to support DELETE /property/{id}/floor/{floor_id}/tenant
-	router.HandleFunc("/property/{id:[0-9]+}/floor/{floor_id:[0-9]+}/tenant", handlers.RemoveTenantHandler).Methods("DELETE")
+	// Get pending payment notifications for a floor
+	protectedRouter.HandleFunc("/property/{id:[0-9]+}/floor/{floor_id:[0-9]+}/pending-payments", handlers.GetPendingPaymentNotificationsHandler).Methods("GET")
 
 	router.Walk(func(route *mux.Route, r *mux.Router, ancestors []*mux.Route) error {
 		path, _ := route.GetPathTemplate()

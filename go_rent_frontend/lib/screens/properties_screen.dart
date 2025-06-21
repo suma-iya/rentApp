@@ -36,7 +36,7 @@ class _PropertiesScreenState extends State<PropertiesScreen> {
     try {
       final notifications = await _apiService.getNotifications();
       setState(() {
-        _unreadNotifications = notifications.where((n) => n.status == 'pending').length;
+        _unreadNotifications = notifications.where((n) => !n.isRead).length;
       });
     } catch (e) {
       print('Error loading notifications: $e');
@@ -255,6 +255,17 @@ class _PropertiesScreenState extends State<PropertiesScreen> {
               IconButton(
                 icon: const Icon(Icons.notifications),
                 onPressed: () async {
+                  // Mark notifications as read when user clicks the notification icon
+                  try {
+                    await _apiService.markNotificationsAsRead();
+                    // Update the unread count to 0
+                    setState(() {
+                      _unreadNotifications = 0;
+                    });
+                  } catch (e) {
+                    print('Error marking notifications as read: $e');
+                  }
+                  
                   await Navigator.push(
                     context,
                     MaterialPageRoute(
