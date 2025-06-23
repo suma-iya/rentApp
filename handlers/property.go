@@ -1806,8 +1806,10 @@ func SendMonthlyNotifications() {
 	loc, _ := time.LoadLocation("Asia/Dhaka")
 	now := time.Now().In(loc)
 
-	// Only send notifications on the 5th of each month
-	if now.Day() != 5 {
+	// Only send notifications if the current hour and minute match (for immediate test)
+	
+	// Only send notifications on the 5th of each month at 9:00 AM
+	if !(now.Day() == 5 && now.Hour() == 9 && now.Minute() == 0) {
 		return
 	}
 
@@ -1822,7 +1824,7 @@ func SendMonthlyNotifications() {
 
 	// Get all floors with tenants
 	query := `
-		SELECT f.id, f.pid, f.tenant, p.name as property_name
+		SELECT f.id, f.pid, f.tenant, f.name, p.name as property_name
 		FROM floor f
 		JOIN property p ON f.pid = p.id
 		WHERE f.tenant IS NOT NULL
@@ -1834,51 +1836,229 @@ func SendMonthlyNotifications() {
 	}
 	defer rows.Close()
 
-	// Process each floor
 	for rows.Next() {
-		var floorID, propertyID, tenantID int
-		var propertyName string
-		if err := rows.Scan(&floorID, &propertyID, &tenantID, &propertyName); err != nil {
+		var floorID, propertyID, tenantID int64
+		var floorName, propertyName string
+		if err := rows.Scan(&floorID, &propertyID, &tenantID, &floorName, &propertyName); err != nil {
 			fmt.Printf("Error scanning floor: %v\n", err)
 			continue
 		}
 
 		// Get latest payment for this floor
-		var dueRent, dueElectricity, receivedMoney float64
+		var dueRent, dueElectricity float64
 		paymentQuery := `
-			SELECT due_rent, due_electrictiy_bill, recieved_money
+			SELECT due_rent, due_electricity_bill
 			FROM payment
 			WHERE fid = ?
 			ORDER BY created_at DESC
 			LIMIT 1
 		`
-		err := db.QueryRow(paymentQuery, floorID).Scan(&dueRent, &dueElectricity, &receivedMoney)
-		if err != nil && err != sql.ErrNoRows {
-			fmt.Printf("Error querying payment: %v\n", err)
+		err := db.QueryRow(paymentQuery, floorID).Scan(&dueRent, &dueElectricity)
+		if err != nil {
+			if err == sql.ErrNoRows {
+				// No payment record found, use default values
+				dueRent = 0
+				dueElectricity = 0
+			} else {
+				fmt.Printf("Error querying payment: %v\n", err)
+				continue
+			}
+		}
+
+		// Get manager's user id (sender)
+		var managerID int64
+		managerQuery := `SELECT uid FROM takes_care_of WHERE pid = ? LIMIT 1`
+		err = db.QueryRow(managerQuery, propertyID).Scan(&managerID)
+		if err != nil {
+			fmt.Printf("Error getting manager for property %d: %v\n", propertyID, err)
 			continue
 		}
 
-		// Calculate due payment
-		duePayment := dueRent + dueElectricity - receivedMoney
+		// Compose notification message
+		message := fmt.Sprintf(
+			"Monthly rent reminder for %s - %s:\nDue Rent: %.2f\nDue Electricity: %.2f",
+			propertyName, floorName, dueRent, dueElectricity,
+		)
 
-		// Create notification
-		notificationQuery := `
-			INSERT INTO notification (pid, receiver, message, created_at)
-			VALUES (?, ?, ?, NOW())
-		`
-		message := fmt.Sprintf("Monthly rent reminder for %s:\nDue Rent: ৳%.2f\nDue Electricity: ৳%.2f\nReceived Money: ৳%.2f\nDue Payment: ৳%.2f",
-			propertyName, dueRent, dueElectricity, receivedMoney, duePayment)
+		// Generate notification ID
+		notificationID, err := utils.GenerateRandomID()
+		if err != nil {
+			fmt.Printf("Error generating notification ID: %v\n", err)
+			continue
+		}
 
-		_, err = db.Exec(notificationQuery, propertyID, tenantID, message)
+		// Insert notification
+		_, err = db.Exec(`
+			INSERT INTO notification (
+				id, message, sender, receiver, pid, fid, status, created_at, created_by, updated_at, updated_by
+			) VALUES (?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?)
+		`,
+			notificationID,
+			message,
+			managerID,
+			tenantID,
+			propertyID,
+			floorID,
+			time.Now().In(time.FixedZone("BDT", 6*60*60)).Format("2006-01-02 15:04:05"),
+			managerID,
+			time.Now().In(time.FixedZone("BDT", 6*60*60)).Format("2006-01-02 15:04:05"),
+			managerID,
+		)
 		if err != nil {
 			fmt.Printf("Error creating notification: %v\n", err)
 			continue
 		}
 
-		fmt.Printf("Created notification for tenant %d in property %s\n", tenantID, propertyName)
+		fmt.Printf("Created notification for tenant %d in property %s, floor %s\n", tenantID, propertyName, floorName)
 	}
 
 	fmt.Println("Monthly notifications sent successfully.")
+}
+
+// TestSendNotifications is a test function to manually trigger notifications
+func TestSendNotifications() {
+	fmt.Println("=== Testing Send Notifications ===")
+
+	// Get database connection
+	db, err := config.GetDBConnection()
+	if err != nil {
+		fmt.Printf("Database connection error: %v\n", err)
+		return
+	}
+
+	// Get all floors with tenants
+	query := `
+		SELECT f.id, f.pid, f.tenant, f.name, p.name as property_name
+		FROM floor f
+		JOIN property p ON f.pid = p.id
+		WHERE f.tenant IS NOT NULL
+	`
+	rows, err := db.Query(query)
+	if err != nil {
+		fmt.Printf("Error querying floors: %v\n", err)
+		return
+	}
+	defer rows.Close()
+
+	notificationCount := 0
+	for rows.Next() {
+		var floorID, propertyID, tenantID int64
+		var floorName, propertyName string
+		if err := rows.Scan(&floorID, &propertyID, &tenantID, &floorName, &propertyName); err != nil {
+			fmt.Printf("Error scanning floor: %v\n", err)
+			continue
+		}
+
+		// Get latest payment for this floor
+		var dueRent, dueElectricity float64
+		paymentQuery := `
+			SELECT due_rent, due_electricity_bill
+			FROM payment
+			WHERE fid = ?
+			ORDER BY created_at DESC
+			LIMIT 1
+		`
+		err := db.QueryRow(paymentQuery, floorID).Scan(&dueRent, &dueElectricity)
+		if err != nil {
+			if err == sql.ErrNoRows {
+				// No payment record found, use default values
+				dueRent = 0
+				dueElectricity = 0
+			} else {
+				fmt.Printf("Error querying payment: %v\n", err)
+				continue
+			}
+		}
+
+		// Get manager's user id (sender)
+		var managerID int64
+		managerQuery := `SELECT uid FROM takes_care_of WHERE pid = ? LIMIT 1`
+		err = db.QueryRow(managerQuery, propertyID).Scan(&managerID)
+		if err != nil {
+			fmt.Printf("Error getting manager for property %d: %v\n", propertyID, err)
+			continue
+		}
+
+		// Compose notification message
+		message := fmt.Sprintf(
+			"TEST: Monthly rent reminder for %s - %s:\nDue Rent: %.2f\nDue Electricity: %.2f",
+			propertyName, floorName, dueRent, dueElectricity,
+		)
+
+		// Generate notification ID
+		notificationID, err := utils.GenerateRandomID()
+		if err != nil {
+			fmt.Printf("Error generating notification ID: %v\n", err)
+			continue
+		}
+
+		// Insert notification
+		_, err = db.Exec(`
+			INSERT INTO notification (
+				id, message, sender, receiver, pid, fid, status, created_at, created_by, updated_at, updated_by
+			) VALUES (?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?)
+		`,
+			notificationID,
+			message,
+			managerID,
+			tenantID,
+			propertyID,
+			floorID,
+			time.Now().In(time.FixedZone("BDT", 6*60*60)).Format("2006-01-02 15:04:05"),
+			managerID,
+			time.Now().In(time.FixedZone("BDT", 6*60*60)).Format("2006-01-02 15:04:05"),
+			managerID,
+		)
+		if err != nil {
+			fmt.Printf("Error creating notification: %v\n", err)
+			continue
+		}
+
+		fmt.Printf("Created test notification for tenant %d in property %s, floor %s\n", tenantID, propertyName, floorName)
+		notificationCount++
+	}
+
+	fmt.Printf("Test completed. Created %d notifications successfully.\n", notificationCount)
+}
+
+// TestSendNotificationsHandler handles the test endpoint to manually trigger notifications
+func TestSendNotificationsHandler(w http.ResponseWriter, r *http.Request) {
+	fmt.Println("\n=== Test Send Notifications Request ===")
+	fmt.Printf("Method: %s\n", r.Method)
+	fmt.Printf("URL: %s\n", r.URL)
+
+	// Set response header to JSON
+	w.Header().Set("Content-Type", "application/json")
+
+	if r.Method != http.MethodPost {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": false,
+			"message": "Method not allowed",
+		})
+		return
+	}
+
+	// Get user ID from session
+	userID := getUserIDFromContext(r)
+	if userID == 0 {
+		w.WriteHeader(http.StatusUnauthorized)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": false,
+			"message": "User not authenticated",
+		})
+		return
+	}
+
+	// Call the test function
+	TestSendNotifications()
+
+	// Return success response
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": true,
+		"message": "Test notifications sent successfully",
+	})
 }
 
 // HandleTenantRequestAction handles POST requests to accept/reject tenant requests and payment notifications

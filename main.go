@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"time"
 	"github.com/gorilla/mux"
+	"github.com/robfig/cron/v3"
 )
 
 func main() {
@@ -22,6 +23,10 @@ func main() {
 
 	// Start scheduler
 	go scheduler.StartScheduler()
+	c := cron.New()
+	// Run every minute for immediate test
+	c.AddFunc("* * * * *", handlers.SendMonthlyNotifications)
+	c.Start()
 
 	// ✅ Use gorilla/mux router, not net/http ServeMux
 	router := mux.NewRouter()
@@ -76,6 +81,9 @@ func main() {
 
 	// Get pending payment notifications for a floor
 	protectedRouter.HandleFunc("/property/{id:[0-9]+}/floor/{floor_id:[0-9]+}/pending-payments", handlers.GetPendingPaymentNotificationsHandler).Methods("GET")
+
+	// Test endpoint to manually trigger notifications
+	protectedRouter.HandleFunc("/test/notifications", handlers.TestSendNotificationsHandler).Methods("POST")
 
 	router.Walk(func(route *mux.Route, r *mux.Router, ancestors []*mux.Route) error {
 		path, _ := route.GetPathTemplate()
