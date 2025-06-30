@@ -7,6 +7,7 @@ class AppNotification {
   final NotificationFloor floor;
   final bool showActions;
   final bool isRead;
+  final String? comment;
 
   AppNotification({
     required this.id,
@@ -17,6 +18,7 @@ class AppNotification {
     required this.floor,
     required this.showActions,
     required this.isRead,
+    this.comment,
   });
 
   factory AppNotification.fromJson(Map<String, dynamic> json) {
@@ -29,6 +31,7 @@ class AppNotification {
       floor: NotificationFloor.fromJson(json['floor']),
       showActions: json['show_actions'] ?? false,
       isRead: json['is_read'] ?? false,
+      comment: json['comment'],
     );
   }
 
@@ -42,6 +45,7 @@ class AppNotification {
       'floor': floor.toJson(),
       'show_actions': showActions,
       'is_read': isRead,
+      'comment': comment,
     };
   }
 }

@@ -573,23 +573,14 @@ class _PropertyDetailsScreenState extends State<PropertyDetailsScreen> {
               IconButton(
                 icon: const Icon(Icons.notifications),
                 onPressed: () async {
-                  // Mark notifications as read when user clicks the notification icon
-                  try {
-                    await _apiService.markNotificationsAsRead();
-                    // Update the unread count to 0
-                    setState(() {
-                      _unreadNotifications = 0;
-                    });
-                  } catch (e) {
-                    print('Error marking notifications as read: $e');
-                  }
-                  
+                  // Navigate to notifications screen without marking as read immediately
                   await Navigator.push(
                     context,
                     MaterialPageRoute(
                       builder: (context) => const NotificationsScreen(),
                     ),
                   );
+                  // Reload notifications to update unread count after returning
                   _loadNotifications();
                 },
               ),
@@ -678,7 +669,7 @@ class _PropertyDetailsScreenState extends State<PropertyDetailsScreen> {
                                     
                                     crossAxisAlignment: CrossAxisAlignment.start,
                                     children: [
-                                      Text('Rent: ₹${floor.rent}/month'),
+                                      Text('Rent: ${floor.rent} tk/month'),
                                       if (floor.tenant != null)
                                         Text('Tenant: ${floor.tenant}'),
                                       if (floor.status == 'pending')

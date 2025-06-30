@@ -255,23 +255,14 @@ class _PropertiesScreenState extends State<PropertiesScreen> {
               IconButton(
                 icon: const Icon(Icons.notifications),
                 onPressed: () async {
-                  // Mark notifications as read when user clicks the notification icon
-                  try {
-                    await _apiService.markNotificationsAsRead();
-                    // Update the unread count to 0
-                    setState(() {
-                      _unreadNotifications = 0;
-                    });
-                  } catch (e) {
-                    print('Error marking notifications as read: $e');
-                  }
-                  
+                  // Navigate to notifications screen without marking as read immediately
                   await Navigator.push(
                     context,
                     MaterialPageRoute(
                       builder: (context) => const NotificationsScreen(),
                     ),
                   );
+                  // Reload notifications to update unread count after returning
                   _loadNotifications();
                 },
               ),
@@ -302,8 +293,35 @@ class _PropertiesScreenState extends State<PropertiesScreen> {
             ],
           ),
           IconButton(
-            icon: const Icon(Icons.refresh),
-            onPressed: _loadProperties,
+            icon: const Icon(Icons.logout),
+            onPressed: () async {
+              // Show confirmation dialog
+              final shouldLogout = await showDialog<bool>(
+                context: context,
+                builder: (context) => AlertDialog(
+                  title: const Text('Logout'),
+                  content: const Text('Are you sure you want to logout?'),
+                  actions: [
+                    TextButton(
+                      onPressed: () => Navigator.pop(context, false),
+                      child: const Text('Cancel'),
+                    ),
+                    TextButton(
+                      onPressed: () => Navigator.pop(context, true),
+                      child: const Text('Logout'),
+                    ),
+                  ],
+                ),
+              );
+
+              if (shouldLogout == true) {
+                // Clear session token
+                await _apiService.clearSessionToken();
+                
+                // Navigate to login screen
+                Navigator.of(context).pushReplacementNamed('/login');
+              }
+            },
           ),
         ],
       ),

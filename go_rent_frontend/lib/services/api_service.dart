@@ -9,6 +9,7 @@ class ApiService {
   static final ApiService _instance = ApiService._internal();
   factory ApiService() => _instance;
   ApiService._internal();
+  //static const String baseUrl = 'http://192.168.0.230:8080';
 
   static const String baseUrl = 'http://192.168.0.230:8080';
   String? _sessionToken;
@@ -816,6 +817,39 @@ class ApiService {
       }
     } catch (e) {
       print('Error marking notifications as read: $e');
+      if (e.toString().contains('SocketException')) {
+        throw Exception('Could not connect to server. Please check if the server is running and you have internet connection.');
+      }
+      throw Exception('Error: $e');
+    }
+  }
+
+  Future<bool> sendComment(int notificationId, String comment) async {
+    try {
+      print('Sending comment for notification: $notificationId');
+      final response = await _client.post(
+        Uri.parse('$baseUrl/notifications/send-comment'),
+        headers: _headers,
+        body: json.encode({
+          'notification_id': notificationId,
+          'comment': comment,
+        }),
+      );
+
+      print('Response status code: ${response.statusCode}');
+      print('Response body: ${response.body}');
+
+      if (response.statusCode == 200) {
+        final Map<String, dynamic> data = json.decode(response.body);
+        return data['success'] ?? false;
+      } else if (response.statusCode == 401) {
+        _sessionToken = null; // Clear invalid session token
+        throw Exception('Session expired. Please login again.');
+      } else {
+        throw Exception('Server returned status code ${response.statusCode}');
+      }
+    } catch (e) {
+      print('Error sending comment: $e');
       if (e.toString().contains('SocketException')) {
         throw Exception('Could not connect to server. Please check if the server is running and you have internet connection.');
       }

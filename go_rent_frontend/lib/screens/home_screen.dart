@@ -1,9 +1,8 @@
 import 'package:flutter/material.dart';
-import '../models/property.dart';
-import '../models/notification.dart' as models;
 import '../services/api_service.dart';
-import 'property_details_screen.dart';
-import 'notifications_screen.dart';
+import '../models/property.dart';
+import '../screens/property_details_screen.dart';
+import '../screens/notifications_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({Key? key}) : super(key: key);

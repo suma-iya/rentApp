@@ -75,6 +75,7 @@ func main() {
 	protectedRouter.HandleFunc("/notifications/mark-read", handlers.MarkNotificationsAsReadHandler).Methods("POST")
 	protectedRouter.HandleFunc("/notifications/delete/{id}", handlers.DeleteNotificationHandler).Methods("DELETE")
 	protectedRouter.HandleFunc("/notifications/action", handlers.HandleTenantRequestAction).Methods("POST")
+	protectedRouter.HandleFunc("/notifications/send-comment", handlers.SendCommentHandler).Methods("POST")
 
 	// New payment notification route
 	protectedRouter.HandleFunc("/property/{id:[0-9]+}/floor/{floor_id:[0-9]+}/payment-notification", handlers.SendPaymentNotificationHandler).Methods("POST")
@@ -101,6 +102,6 @@ func main() {
 		IdleTimeout:  60 * time.Second,
 	}
 
-	fmt.Println("Server starting on http://0.0.0.0:8080")
+	fmt.Println("Server starting on http://192.168.0.230:8080")
 	log.Fatal(server.ListenAndServe())
 }

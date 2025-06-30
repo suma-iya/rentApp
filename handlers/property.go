@@ -14,6 +14,7 @@ import (
 	"time"
 	"github.com/gorilla/mux"
 	"log"
+	"regexp"
 )
 
 // getUserIDFromContext retrieves the user ID from the request context
@@ -131,6 +132,7 @@ type Notification struct {
 	} `json:"floor"`
 	ShowActions bool `json:"show_actions"`
 	IsRead      bool `json:"is_read"`
+	Comment     *string `json:"comment,omitempty"`
 }
 
 type NotificationsResponse struct {
@@ -1578,18 +1580,18 @@ func GetUserNotificationsHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Get all notifications for the user
+	// Get all notifications for the user (only received notifications)
 	query := `
 		SELECT 
 			n.id, n.message, n.status, n.created_at,
 			p.id as property_id, p.name as property_name,
 			f.id as floor_id, f.name as floor_name,
 			CASE 
-				WHEN n.message LIKE 'Tenant request%' AND n.status = 'pending' THEN true
-				WHEN n.message LIKE 'Payment amount:%' AND n.status = 'pending' THEN true
+				WHEN n.status = 'pending' THEN true
 				ELSE false
 			END as show_actions,
-			COALESCE(n.is_read, false) as is_read
+			COALESCE(n.is_read, false) as is_read,
+			n.comment
 		FROM notification n
 		JOIN property p ON n.pid = p.id
 		JOIN floor f ON n.fid = f.id
@@ -1617,14 +1619,15 @@ func GetUserNotificationsHandler(w http.ResponseWriter, r *http.Request) {
 			&n.Floor.ID, &n.Floor.Name,
 			&n.ShowActions,
 			&n.IsRead,
+			&n.Comment,
 		); err != nil {
 			fmt.Printf("Error scanning notification row: %v\n", err)
 			continue
 		}
 		
 		// Debug logging for each notification
-		fmt.Printf("Notification: ID=%d, Message='%s', Status='%s', ShowActions=%v, IsRead=%v\n", 
-			n.ID, n.Message, n.Status, n.ShowActions, n.IsRead)
+		fmt.Printf("Notification: ID=%d, Message='%s', Status='%s', ShowActions=%v, IsRead=%v, Comment=%v\n", 
+			n.ID, n.Message, n.Status, n.ShowActions, n.IsRead, n.Comment)
 		
 		notifications = append(notifications, n)
 	}
@@ -1810,8 +1813,8 @@ func SendMonthlyNotifications() {
 	
 	// Only send notifications on the 5th of each month at 9:00 AM
 	if !(now.Day() == 5 && now.Hour() == 9 && now.Minute() == 0) {
-		return
-	}
+        return
+    }
 
 	fmt.Println("=== Sending Monthly Notifications ===")
 
@@ -1860,8 +1863,8 @@ func SendMonthlyNotifications() {
 				dueRent = 0
 				dueElectricity = 0
 			} else {
-				fmt.Printf("Error querying payment: %v\n", err)
-				continue
+			fmt.Printf("Error querying payment: %v\n", err)
+			continue
 			}
 		}
 
@@ -1876,7 +1879,7 @@ func SendMonthlyNotifications() {
 
 		// Compose notification message
 		message := fmt.Sprintf(
-			"Monthly rent reminder for %s - %s:\nDue Rent: %.2f\nDue Electricity: %.2f",
+			"Monthly rent reminder for %s - %s:\nDue Rent: %.2f tk\nDue Electricity: %.2f tk",
 			propertyName, floorName, dueRent, dueElectricity,
 		)
 
@@ -1981,7 +1984,7 @@ func TestSendNotifications() {
 
 		// Compose notification message
 		message := fmt.Sprintf(
-			"TEST: Monthly rent reminder for %s - %s:\nDue Rent: %.2f\nDue Electricity: %.2f",
+			"TEST: Monthly rent reminder for %s - %s:\nDue Rent: %.2f tk\nDue Electricity: %.2f tk",
 			propertyName, floorName, dueRent, dueElectricity,
 		)
 
@@ -2201,65 +2204,6 @@ func HandleTenantRequestAction(w http.ResponseWriter, r *http.Request) {
 		}
 		// If rejected, just update the notification status (already done above)
 		
-		// Create a new notification to inform the tenant about the payment status
-		// Get property and floor names for the notification message
-		var propertyName, floorName string
-		err = tx.QueryRow(`
-			SELECT p.name, f.name
-			FROM property p
-			JOIN floor f ON p.id = f.pid
-			WHERE p.id = ? AND f.id = ?`, notification.PID, notification.FloorID).Scan(&propertyName, &floorName)
-		
-		if err != nil {
-			fmt.Printf("Error getting property/floor names: %v\n", err)
-			http.Error(w, "Failed to get property details", http.StatusInternalServerError)
-			return
-		}
-		
-		// Generate new notification ID
-		statusNotificationID, err := utils.GenerateRandomID()
-		if err != nil {
-			fmt.Printf("Error generating status notification ID: %v\n", err)
-			http.Error(w, "Error generating notification ID", http.StatusInternalServerError)
-			return
-		}
-		
-		// Create status message
-		statusMessage := fmt.Sprintf("Payment %s - %s, %s at %s", 
-			newStatus, 
-			propertyName, 
-			floorName, 
-			time.Now().In(time.FixedZone("BDT", 6*60*60)).Format("2006-01-02 15:04:05"))
-		
-		// Insert the status notification
-		// Note: sender is the original notification's receiver (manager), receiver is the original notification's sender (tenant)
-		_, err = tx.Exec(`
-			INSERT INTO notification (
-				id, message, sender, receiver, pid, fid,
-				status, created_at, created_by, updated_at, updated_by
-			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-			statusNotificationID,
-			statusMessage,
-			notification.Receiver, // manager (original receiver)
-			notification.Sender,   // tenant (original sender)
-			notification.PID,
-			notification.FloorID,
-			newStatus, // Use the same status as the action (accepted/rejected)
-			time.Now().In(time.FixedZone("BDT", 6*60*60)).Format("2006-01-02 15:04:05"),
-			userID,
-			time.Now().In(time.FixedZone("BDT", 6*60*60)).Format("2006-01-02 15:04:05"),
-			userID,
-		)
-		
-		if err != nil {
-			fmt.Printf("Error creating status notification: %v\n", err)
-			http.Error(w, "Failed to create status notification", http.StatusInternalServerError)
-			return
-		}
-		
-		fmt.Printf("Created status notification: ID=%d, Message='%s', from manager=%d to tenant=%d", 
-			statusNotificationID, statusMessage, notification.Receiver, notification.Sender)
-		
 	} else {
 		// Handle tenant request
 		if request.Accept {
@@ -2304,6 +2248,77 @@ func HandleTenantRequestAction(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Generate new notification ID for the auto-generated response
+	newNotificationID, err := utils.GenerateRandomID()
+	if err != nil {
+		fmt.Printf("Error generating notification ID: %v\n", err)
+		// Don't fail the whole request, just log the error
+		fmt.Printf("Failed to create auto-response notification")
+	} else {
+		// Create auto-generated response notification
+		var responseMessage string
+		if isPaymentNotification {
+			// Extract amount from the original message for payment notifications
+			// Original message format: "Payment amount: X tk" or "Payment amount: $X"
+			amountRegex := regexp.MustCompile(`Payment amount:\s*([0-9]+)\s*(tk|\$|৳)`)
+			matches := amountRegex.FindStringSubmatch(notification.Message)
+			if len(matches) >= 2 {
+				amount := matches[1]
+				if request.Accept {
+					responseMessage = fmt.Sprintf("Payment of %s tk is accepted", amount)
+				} else {
+					responseMessage = fmt.Sprintf("Payment of %s tk is rejected", amount)
+				}
+			} else {
+				if request.Accept {
+					responseMessage = "Payment request is accepted"
+				} else {
+					responseMessage = "Payment request is rejected"
+				}
+			}
+		} else {
+			// Handle tenant request
+			if request.Accept {
+				responseMessage = "Tenant request is accepted"
+			} else {
+				responseMessage = "Tenant request is rejected"
+			}
+		}
+		
+		// Determine sender and receiver for the response notification
+		// The response should go from the person who took the action to the original sender
+		responseSender := notification.Receiver // Person who accepted/rejected
+		responseReceiver := notification.Sender // Original sender of the request
+		
+		_, err = db.Exec(`
+			INSERT INTO notification (
+				id, message, sender, receiver, pid, fid, status, comment,
+				created_at, created_by, updated_at, updated_by
+			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		`,
+		newNotificationID,
+		responseMessage,
+		responseSender,
+		responseReceiver,
+		notification.PID,
+		notification.FloorID,
+		newStatus,
+		nil, // No comment initially - let users add comments to this response
+		time.Now().In(time.FixedZone("BDT", 6*60*60)).Format("2006-01-02 15:04:05"),
+		userID,
+		time.Now().In(time.FixedZone("BDT", 6*60*60)).Format("2006-01-02 15:04:05"),
+		userID,
+		)
+
+		if err != nil {
+			fmt.Printf("Error creating auto-response notification: %v\n", err)
+			// Don't fail the whole request, just log the error
+		} else {
+			fmt.Printf("Created auto-response notification: ID=%d, Message='%s', from user=%d to user=%d", 
+				newNotificationID, responseMessage, responseSender, responseReceiver)
+		}
+	}
+
 	// Send response
 	actionType := "payment notification"
 	if !isPaymentNotification {
@@ -2312,7 +2327,7 @@ func HandleTenantRequestAction(w http.ResponseWriter, r *http.Request) {
 	
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"success": true,
-		"message": actionType + " " + newStatus,
+		"message": actionType + " " + newStatus + " (auto-response notification sent, use /notifications/send-comment to add comments)",
 	})
 }
 
@@ -2671,7 +2686,7 @@ func SendPaymentNotificationHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Compose message with structured format
-	message := fmt.Sprintf("Payment amount: $%d", req.Amount)
+	message := fmt.Sprintf("Payment amount: %d tk", req.Amount)
 
 	// Generate notification ID
 	notificationID, err := utils.GenerateRandomID()
@@ -2993,4 +3008,190 @@ func AddTenantToFloorHandler(w http.ResponseWriter, r *http.Request) {
 
 	w.WriteHeader(http.StatusCreated)
 	json.NewEncoder(w).Encode(TenantRequestResponse{true, "Tenant added to floor successfully"})
+}
+
+// SendCommentHandler handles POST requests to send comments to notifications
+func SendCommentHandler(w http.ResponseWriter, r *http.Request) {
+	fmt.Println("\n=== New Send Comment Request ===")
+	fmt.Printf("Method: %s\n", r.Method)
+	fmt.Printf("URL: %s\n", r.URL)
+
+	// Set response header to JSON
+	w.Header().Set("Content-Type", "application/json")
+
+	if r.Method != http.MethodPost {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": false,
+			"message": "Method not allowed",
+		})
+		return
+	}
+
+	// Get user ID from session
+	userID := getUserIDFromContext(r)
+	if userID == 0 {
+		w.WriteHeader(http.StatusUnauthorized)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": false,
+			"message": "User not authenticated",
+		})
+		return
+	}
+
+	// Parse request body
+	var request struct {
+		NotificationID int64  `json:"notification_id"`
+		Comment        string `json:"comment"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	// Get database connection
+	db, err := config.GetDBConnection()
+	if err != nil {
+		fmt.Printf("Database connection error: %v\n", err)
+		http.Error(w, "Database connection failed", http.StatusInternalServerError)
+		return
+	}
+
+	// Start transaction
+	tx, err := db.Begin()
+	if err != nil {
+		fmt.Printf("Transaction start error: %v\n", err)
+		http.Error(w, "Failed to start transaction", http.StatusInternalServerError)
+		return
+	}
+	defer tx.Rollback()
+
+	// Get original notification details
+	var originalNotification struct {
+		ID       int64
+		Message  string
+		Status   string
+		Sender   int64
+		Receiver int64
+		PID      int64
+		FloorID  int64
+	}
+
+	err = tx.QueryRow(`
+		SELECT id, message, status, sender, receiver, pid, fid
+		FROM notification
+		WHERE id = ? AND (sender = ? OR receiver = ?)
+	`, request.NotificationID, userID, userID).Scan(
+		&originalNotification.ID,
+		&originalNotification.Message,
+		&originalNotification.Status,
+		&originalNotification.Sender,
+		&originalNotification.Receiver,
+		&originalNotification.PID,
+		&originalNotification.FloorID,
+	)
+
+	if err != nil {
+		fmt.Printf("Error getting notification: %v\n", err)
+		if err == sql.ErrNoRows {
+			http.Error(w, "Notification not found", http.StatusNotFound)
+		} else {
+			http.Error(w, "Failed to get notification", http.StatusInternalServerError)
+		}
+		return
+	}
+
+	// Determine the new notification's sender and receiver
+	var newSender, newReceiver int64
+	if userID == originalNotification.Sender {
+		newSender = originalNotification.Sender
+		newReceiver = originalNotification.Receiver
+	} else {
+		newSender = originalNotification.Receiver
+		newReceiver = originalNotification.Sender
+	}
+
+	// Determine status for the new notification
+	var newStatus string
+	if originalNotification.Status == "accepted" {
+		newStatus = "accepted"
+	} else if originalNotification.Status == "rejected" {
+		newStatus = "rejected"
+	} else {
+		newStatus = "pending" // If original status is NULL or any other value
+	}
+
+	// Create the new message with comment
+	var newMessage string
+	if request.Comment != "" {
+		newMessage = request.Comment
+	} else {
+		newMessage = "Response sent"
+	}
+
+	// Generate new notification ID
+	newNotificationID, err := utils.GenerateRandomID()
+	if err != nil {
+		fmt.Printf("Error generating notification ID: %v\n", err)
+		http.Error(w, "Error generating notification ID", http.StatusInternalServerError)
+		return
+	}
+
+	// Insert the new notification
+	_, err = tx.Exec(`
+		INSERT INTO notification (
+			id, message, sender, receiver, pid, fid, status, comment,
+			created_at, created_by, updated_at, updated_by
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`,
+		newNotificationID,
+		newMessage,
+		newSender,
+		newReceiver,
+		originalNotification.PID,
+		originalNotification.FloorID,
+		newStatus,
+		nil, // Don't set comment on new notification - let it be NULL so "Add Comment" button shows
+		time.Now().In(time.FixedZone("BDT", 6*60*60)).Format("2006-01-02 15:04:05"),
+		userID,
+		time.Now().In(time.FixedZone("BDT", 6*60*60)).Format("2006-01-02 15:04:05"),
+		userID,
+	)
+
+	if err != nil {
+		fmt.Printf("Error creating notification: %v\n", err)
+		http.Error(w, "Failed to create notification", http.StatusInternalServerError)
+		return
+	}
+
+	// Update the original notification with the comment
+	_, err = tx.Exec(`
+		UPDATE notification 
+		SET comment = ?, updated_at = NOW(), updated_by = ?
+		WHERE id = ?
+	`, request.Comment, userID, request.NotificationID)
+
+	if err != nil {
+		fmt.Printf("Error updating original notification comment: %v\n", err)
+		http.Error(w, "Failed to update original notification comment", http.StatusInternalServerError)
+		return
+	}
+
+	// Commit transaction
+	if err = tx.Commit(); err != nil {
+		fmt.Printf("Error committing transaction: %v\n", err)
+		http.Error(w, "Failed to commit transaction", http.StatusInternalServerError)
+		return
+	}
+
+	fmt.Printf("Created comment notification: ID=%d, Message='%s', from user=%d to user=%d", 
+		newNotificationID, newMessage, newSender, newReceiver)
+
+	// Send response
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": true,
+		"message": "Comment sent successfully",
+		"notification_id": newNotificationID,
+	})
 }
