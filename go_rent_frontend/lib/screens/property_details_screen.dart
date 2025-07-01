@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import '../models/property.dart';
 import '../models/floor.dart';
 import '../services/api_service.dart';
@@ -22,6 +23,16 @@ class _PropertyDetailsScreenState extends State<PropertyDetailsScreen> {
   Property? _property;
   int _unreadNotifications = 0;
   bool _isManager = false;
+
+  // Modern color schemes
+  final Color _managedColor = const Color(0xFF6366F1); // Modern indigo
+  final Color _tenantColor = const Color(0xFF10B981); // Modern emerald
+  final Color _backgroundColor = const Color(0xFFF8FAFC);
+  final Color _cardColor = Colors.white;
+  final Color _textPrimary = const Color(0xFF1E293B);
+  final Color _textSecondary = const Color(0xFF64748B);
+  
+  Color get _themeColor => _isManager ? _managedColor : _tenantColor;
 
   @override
   void initState() {
@@ -565,8 +576,37 @@ class _PropertyDetailsScreenState extends State<PropertyDetailsScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      backgroundColor: _backgroundColor,
       appBar: AppBar(
-        title: Text(_property?.name ?? widget.property.name),
+        title: Text(
+          _property?.name ?? widget.property.name,
+          style: const TextStyle(
+            fontWeight: FontWeight.w700,
+            fontSize: 20,
+            color: Colors.white,
+          ),
+        ),
+        centerTitle: true,
+        elevation: 0,
+        backgroundColor: _themeColor,
+        systemOverlayStyle: SystemUiOverlayStyle.light,
+        leading: Hero(
+          tag: 'property_${widget.property.id}',
+          child: Container(
+            margin: const EdgeInsets.all(8),
+            decoration: BoxDecoration(
+              color: Colors.white.withOpacity(0.2),
+              shape: BoxShape.circle,
+            ),
+            child: IconButton(
+              icon: Icon(
+                _isManager ? Icons.business_rounded : Icons.person_rounded,
+                color: Colors.white,
+              ),
+              onPressed: () => Navigator.pop(context),
+            ),
+          ),
+        ),
         actions: [
           Stack(
             children: [
@@ -625,6 +665,15 @@ class _PropertyDetailsScreenState extends State<PropertyDetailsScreen> {
                         ElevatedButton(
                           onPressed: _loadPropertyDetails,
                           child: const Text('Retry'),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: _themeColor,
+                            foregroundColor: Colors.white,
+                            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            elevation: 0,
+                          ),
                         ),
                       ],
                     ),
@@ -640,118 +689,293 @@ class _PropertyDetailsScreenState extends State<PropertyDetailsScreen> {
                               ElevatedButton(
                                 onPressed: _showAddFloorDialog,
                                 child: const Text('Add First Floor'),
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: _themeColor,
+                                  foregroundColor: Colors.white,
+                                  padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(12),
+                                  ),
+                                  elevation: 0,
+                                ),
                               ),
                             ],
                           ],
                         ),
                       )
                     : ListView.builder(
-                        padding: const EdgeInsets.all(16),
+                        padding: const EdgeInsets.all(20),
                         itemCount: _floors.length,
                         itemBuilder: (context, index) {
                           final floor = _floors[index];
-                          // DEBUG: Print tenant and currentUserId
-                          // ignore: avoid_print
-                          print('floor.tenant: \\${floor.tenant} (type: \\${floor.tenant.runtimeType}), currentUserId: \\${_apiService.currentUserId} (type: \\${_apiService.currentUserId.runtimeType})');
-                          return Card(
-                            margin: const EdgeInsets.only(bottom: 16),
-                            child: Column(
-                              children: [
-                                ListTile(
-                                  leading: Icon(
-                                    floor.status == 'occupied' ? Icons.person : 
-                                    floor.status == 'pending' ? Icons.home : Icons.home,
-                                    color: floor.status == 'occupied' ? Colors.blue : 
-                                          floor.status == 'pending' ? Colors.green : Colors.green,
-                                  ),
-                                  title: Text(floor.name),
-                                  subtitle: Column(
-                                    
-                                    crossAxisAlignment: CrossAxisAlignment.start,
-                                    children: [
-                                      Text('Rent: ${floor.rent} tk/month'),
-                                      if (floor.tenant != null)
-                                        Text('Tenant: ${floor.tenant}'),
-                                      if (floor.status == 'pending')
-                                        Row(
-                                          children: [
-                                            const Text('Request Pending', 
-                                              style: TextStyle(color: Colors.orange, fontWeight: FontWeight.bold)),
-                                            if (floor.tenant != null && floor.tenant == _apiService.currentUserId) ...[
-                                              const SizedBox(width: 8),
-                                              const Icon(Icons.touch_app, size: 16, color: Colors.orange),
-                                              const Text('Tap to view', 
-                                                style: TextStyle(color: Colors.orange, fontSize: 12)),
-                                            ],
-                                          ],
-                                        ),
-                                    ],
-                                  ),
-                                  onTap: () {
-                                    // If tenant and status is pending, navigate to pending payment notifications
-                                    if (floor.status == 'pending' && 
-                                        floor.tenant != null && 
-                                        floor.tenant == _apiService.currentUserId) {
-                                      Navigator.push(
-                                        context,
-                                        MaterialPageRoute(
-                                          builder: (context) => PendingPaymentNotificationsScreen(
-                                            property: widget.property,
-                                            floor: floor,
-                                          ),
-                                        ),
-                                      );
-                                    }
-                                  },
-                                  trailing: _isManager ? Row(
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                      IconButton(
-                                        icon: const Icon(Icons.edit, color: Colors.blue),
-                                        onPressed: () => _showUpdateFloorDialog(floor),
-                                      ),
-                                      if (floor.tenant != null)
-                                        IconButton(
-                                          icon: const Icon(Icons.person_remove, color: Colors.red),
-                                          onPressed: () => _showRemoveTenantDialog(floor),
-                                        )
-                                      else if (floor.status == 'pending' && floor.notificationId != null)
-                                        IconButton(
-                                          icon: const Icon(Icons.cancel, color: Colors.orange),
-                                          onPressed: () => _showCancelRequestDialog(floor),
-                                        )
-                                      else
-                                        IconButton(
-                                          icon: const Icon(Icons.person_add, color: Colors.green),
-                                          onPressed: () => _showTenantRequestDialog(floor),
-                                        ),
-                                    ],
-                                  ) : null,
+                          // Determine status: if tenant exists and no explicit status, it's occupied
+                          final actualStatus = floor.status ?? (floor.tenant != null ? 'occupied' : 'available');
+                          final themeColor = actualStatus == 'occupied'
+                              ? _themeColor
+                              : actualStatus == 'pending'
+                                  ? Colors.orange
+                                  : _themeColor.withOpacity(0.7);
+                          return Container(
+                            margin: const EdgeInsets.only(bottom: 20),
+                            decoration: BoxDecoration(
+                              color: _cardColor,
+                              borderRadius: BorderRadius.circular(20),
+                              boxShadow: [
+                                BoxShadow(
+                                  color: Colors.black.withOpacity(0.08),
+                                  blurRadius: 20,
+                                  spreadRadius: 0,
+                                  offset: const Offset(0, 8),
                                 ),
-                                // Payment notification button for tenants
-                                if (floor.tenant != null && floor.tenant == _apiService.currentUserId)
-                                  Padding(
-                                    padding: const EdgeInsets.only(left: 16, right: 16, bottom: 12),
-                                    child: SizedBox(
-                                      width: double.infinity,
-                                      child: ElevatedButton.icon(
-                                        icon: const Icon(Icons.payment),
-                                        label: const Text('Send Payment Notification'),
-                                        onPressed: () {
-                                          _showSendPaymentDialog(floor);
-                                        },
+                              ],
+                              border: Border.all(
+                                color: themeColor.withOpacity(0.1),
+                                width: 1,
+                              ),
+                            ),
+                            child: Material(
+                              color: Colors.transparent,
+                              child: InkWell(
+                                borderRadius: BorderRadius.circular(20),
+                                onTap: () {
+                                  // Only navigate if it's a pending floor AND the current user is the tenant
+                                  // AND we're not showing the "Tap to view" text (which has its own tap handler)
+                                  if (actualStatus == 'pending' &&
+                                      floor.tenant != null &&
+                                      floor.tenant == _apiService.currentUserId &&
+                                      actualStatus == 'pending') {
+                                    // Don't navigate here - let the "Tap to view" handle it
+                                  }
+                                },
+                                child: Column(
+                                  children: [
+                                    Padding(
+                                      padding: const EdgeInsets.all(20),
+                                      child: Row(
+                                        crossAxisAlignment: CrossAxisAlignment.start,
+                                        children: [
+                                          Container(
+                                            padding: const EdgeInsets.all(16),
+                                            decoration: BoxDecoration(
+                                              gradient: LinearGradient(
+                                                colors: [
+                                                  themeColor.withOpacity(0.2),
+                                                  themeColor.withOpacity(0.1),
+                                                ],
+                                                begin: Alignment.topLeft,
+                                                end: Alignment.bottomRight,
+                                              ),
+                                              borderRadius: BorderRadius.circular(16),
+                                            ),
+                                            child: Icon(
+                                              actualStatus == 'occupied'
+                                                  ? Icons.person_rounded
+                                                  : actualStatus == 'pending'
+                                                      ? Icons.hourglass_top_rounded
+                                                      : Icons.home_rounded,
+                                              color: themeColor,
+                                              size: 28,
+                                            ),
+                                          ),
+                                          const SizedBox(width: 16),
+                                          Expanded(
+                                            child: Column(
+                                              crossAxisAlignment: CrossAxisAlignment.start,
+                                              children: [
+                                                Row(
+                                                  children: [
+                                                    Expanded(
+                                                      child: Text(
+                                                        floor.name,
+                                                        style: TextStyle(
+                                                          fontSize: 18,
+                                                          fontWeight: FontWeight.w700,
+                                                          color: _textPrimary,
+                                                        ),
+                                                        overflow: TextOverflow.ellipsis,
+                                                      ),
+                                                    ),
+                                                    const SizedBox(width: 8),
+                                                    Container(
+                                                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                                                      decoration: BoxDecoration(
+                                                        color: themeColor.withOpacity(0.12),
+                                                        borderRadius: BorderRadius.circular(12),
+                                                      ),
+                                                      child: Text(
+                                                        actualStatus == 'occupied'
+                                                            ? 'Occupied'
+                                                            : actualStatus == 'pending'
+                                                                ? 'Pending'
+                                                                : 'Available',
+                                                        style: TextStyle(
+                                                          fontSize: 12,
+                                                          fontWeight: FontWeight.w600,
+                                                          color: themeColor,
+                                                        ),
+                                                      ),
+                                                    ),
+                                                  ],
+                                                ),
+                                                const SizedBox(height: 6),
+                                                Row(
+                                                  children: [
+                                                    Icon(
+                                                      Icons.attach_money_rounded,
+                                                      size: 16,
+                                                      color: _textSecondary,
+                                                    ),
+                                                    const SizedBox(width: 4),
+                                                    Expanded(
+                                                      child: Text(
+                                                        'Rent: ${floor.rent} tk/month',
+                                                        style: TextStyle(
+                                                          fontSize: 14,
+                                                          color: _textSecondary,
+                                                        ),
+                                                        overflow: TextOverflow.ellipsis,
+                                                      ),
+                                                    ),
+                                                  ],
+                                                ),
+                                                if (floor.tenant != null) ...[
+                                                  const SizedBox(height: 4),
+                                                  Row(
+                                                    children: [
+                                                      Icon(
+                                                        Icons.person,
+                                                        size: 16,
+                                                        color: _textSecondary,
+                                                      ),
+                                                      const SizedBox(width: 4),
+                                                      Expanded(
+                                                        child: Text(
+                                                          'Tenant: ${floor.tenant}',
+                                                          style: TextStyle(
+                                                            fontSize: 14,
+                                                            color: _textSecondary,
+                                                          ),
+                                                          overflow: TextOverflow.ellipsis,
+                                                        ),
+                                                      ),
+                                                    ],
+                                                  ),
+                                                ],
+                                                if (actualStatus == 'pending') ...[
+                                                  const SizedBox(height: 4),
+                                                  Row(
+                                                    children: [
+                                                      const Icon(Icons.hourglass_top_rounded, size: 16, color: Colors.orange),
+                                                      const SizedBox(width: 4),
+                                                      Expanded(
+                                                        child: Text(
+                                                          'Request Pending',
+                                                          style: TextStyle(
+                                                            color: Colors.orange,
+                                                            fontWeight: FontWeight.bold,
+                                                            fontSize: 13,
+                                                          ),
+                                                          overflow: TextOverflow.ellipsis,
+                                                        ),
+                                                      ),
+                                                      if (floor.tenant != null && floor.tenant == _apiService.currentUserId) ...[
+                                                        const SizedBox(width: 8),
+                                                        const Icon(Icons.touch_app, size: 16, color: Colors.orange),
+                                                        GestureDetector(
+                                                          onTap: () {
+                                                            Navigator.push(
+                                                              context,
+                                                              MaterialPageRoute(
+                                                                builder: (context) => PendingPaymentNotificationsScreen(
+                                                                  property: widget.property,
+                                                                  floor: floor,
+                                                                ),
+                                                              ),
+                                                            );
+                                                          },
+                                                          child: const Text('Tap to view',
+                                                            style: TextStyle(color: Colors.orange, fontSize: 12)),
+                                                        ),
+                                                      ],
+                                                    ],
+                                                  ),
+                                                ],
+                                              ],
+                                            ),
+                                          ),
+                                          const SizedBox(width: 8),
+                                          if (_isManager)
+                                            Column(
+                                              children: [
+                                                IconButton(
+                                                  icon: const Icon(Icons.edit, color: Colors.blue),
+                                                  onPressed: () => _showUpdateFloorDialog(floor),
+                                                ),
+                                                if (floor.tenant != null)
+                                                  IconButton(
+                                                    icon: const Icon(Icons.person_remove, color: Colors.red),
+                                                    onPressed: () => _showRemoveTenantDialog(floor),
+                                                  )
+                                                else if (actualStatus == 'pending' && floor.notificationId != null)
+                                                  IconButton(
+                                                    icon: const Icon(Icons.cancel, color: Colors.orange),
+                                                    onPressed: () => _showCancelRequestDialog(floor),
+                                                  )
+                                                else
+                                                  IconButton(
+                                                    icon: const Icon(Icons.person_add, color: Colors.green),
+                                                    onPressed: () => _showTenantRequestDialog(floor),
+                                                  ),
+                                              ],
+                                            ),
+                                        ],
                                       ),
                                     ),
-                                  ),
-                              ],
+                                    // Payment button for tenants
+                                    if (floor.tenant != null && floor.tenant == _apiService.currentUserId)
+                                      Padding(
+                                        padding: const EdgeInsets.only(left: 20, right: 20, bottom: 16),
+                                        child: SizedBox(
+                                          width: double.infinity,
+                                          child: ElevatedButton.icon(
+                                            icon: const Icon(Icons.payment_rounded),
+                                            label: const Text('Send Payment Notification'),
+                                            style: ElevatedButton.styleFrom(
+                                              backgroundColor: _themeColor,
+                                              foregroundColor: Colors.white,
+                                              padding: const EdgeInsets.symmetric(vertical: 16),
+                                              shape: RoundedRectangleBorder(
+                                                borderRadius: BorderRadius.circular(12),
+                                              ),
+                                              elevation: 0,
+                                            ),
+                                            onPressed: () {
+                                              _showSendPaymentDialog(floor);
+                                            },
+                                          ),
+                                        ),
+                                      ),
+                                  ],
+                                ),
+                              ),
                             ),
                           );
                         },
                       ),
       ),
-      floatingActionButton: _isManager ? FloatingActionButton(
+      floatingActionButton: _isManager ? FloatingActionButton.extended(
         onPressed: _showAddFloorDialog,
-        child: const Icon(Icons.add),
+        backgroundColor: _themeColor,
+        foregroundColor: Colors.white,
+        elevation: 8,
+        icon: const Icon(Icons.add_rounded),
+        label: const Text(
+          'Add Floor',
+          style: TextStyle(fontWeight: FontWeight.w600),
+        ),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(16),
+        ),
       ) : null,
     );
   }
