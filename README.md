@@ -513,7 +513,7 @@ This project is licensed under the **MIT License** — see the [LICENSE](LICENSE
 If you use GoRent in your research, please cite:
 ```bibtex
 @software{gorent2026,
-  author = {Suma, Sumaiya Rahim and Shafi, Abdullah Al},
+  author = {Sumaiya Rahim Suma and Abdullah Al Shafi},
   title = {GoRent: Open-source software for transparent rule-based rental risk assessment},
   year = {2026},
   url = {https://github.com/suma-iya/GoRent},
